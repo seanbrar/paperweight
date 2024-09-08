@@ -1,0 +1,16 @@
+.venv
+.env
+.paux
+*.log
+config.yaml
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Cache
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache

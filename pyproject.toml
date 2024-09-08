@@ -1,0 +1,18 @@
+[tool.ruff]
+line-length = 88
+lint.select = ["F", "E", "W", "C90", "I001", "F401"]
+lint.ignore = ["E501"]
+
+# Enable automatic fixing of lint issues
+lint.fixable = ["ALL"]
+lint.unfixable = ["F401"]
+
+[tool.ruff.format]
+# Formatter settings
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+mypy_path = "src"

@@ -1,0 +1,2 @@
+# Ignore changes to dev files when merging into main
+.dev/* merge=ours
