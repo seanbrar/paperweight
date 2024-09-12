@@ -22,3 +22,5 @@ addopts = "--strict-markers"
 markers = [
     "integration: marks tests as integration tests",
 ]
+testpaths = ["tests"]
+pythonpath = ["src"]
