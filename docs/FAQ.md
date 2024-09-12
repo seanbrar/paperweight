@@ -131,7 +131,7 @@ logging:
 
 If you encounter Python dependency issues:
 
-1. Ensure you're using Python 3.7 or higher.
+1. Ensure you're using Python 3.10 or higher.
 2. Try creating a new virtual environment and installing paperweight fresh.
 3. Update your pip and setuptools: `pip install --upgrade pip setuptools`
 4. If you're still having issues, check the project's `setup.py` file for the list of required packages and versions, and try installing them manually.

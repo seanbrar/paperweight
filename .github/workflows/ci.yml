@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/requirements-dev.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install production dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+    - name: Install development dependencies
+      run: |
+        pip install --no-cache-dir --prefer-binary -r requirements-dev.txt
+
+    - name: Install project in editable mode
+      run: |
+        pip install -e .
+
+    - name: Run pre-commit hooks
+      run: |
+        pip install pre-commit
+        pre-commit run --all-files
+      timeout-minutes: 10
+
+    - name: Run Pytest
+      run: pytest
+
+    - name: Run Ruff (linter)
+      run: ruff check .
+
+    - name: Run Mypy (type checking)
+      run: mypy .

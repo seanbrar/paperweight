@@ -26,7 +26,8 @@ def config_file(sample_config):
     os.unlink(temp_config.name)
 
 def test_load_config_basic(config_file):
-    config = load_config(config_path=config_file)
+    with patch.dict(os.environ, {'OPENAI_API_KEY': 'dummy_key'}):
+        config = load_config(config_path=config_file)
     assert isinstance(config, dict)
     assert 'arxiv' in config
     assert 'processor' in config
@@ -42,15 +43,23 @@ def test_load_config_env_vars(config_file):
     assert config['arxiv']['max_results'] == 100
     assert config['analyzer']['api_key'] == 'test_api_key'
 
-def test_load_config_missing_api_key(config_file, sample_config):
-    print("\nStarting test_load_config_missing_api_key")
-    sample_config['analyzer']['type'] = 'summary'
-    sample_config['analyzer']['llm_provider'] = 'openai'
+def test_load_config_missing_env_vars(config_file, sample_config):
+    sample_config['notifier']['email']['password'] = '$MISSING_VAR'
     with open(config_file, 'w') as f:
         yaml.dump(sample_config, f)
+    with patch.dict(os.environ, {'OPENAI_API_KEY': 'dummy_key'}):
+        config = load_config(config_path=config_file)
+    assert config['notifier']['email']['password'] == '$MISSING_VAR'
 
-    with patch('paperweight.utils.load_dotenv'):  # This prevents load_dotenv from being called
-        with patch.dict('os.environ', {}, clear=True):
+def test_load_config_logging(config_file):
+    with patch('paperweight.utils.logger') as mock_logger:
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'dummy_key'}):
+            load_config(config_path=config_file)
+    mock_logger.info.assert_called_with("Configuration loaded and validated successfully")
+
+def test_load_config_missing_api_key(config_file):
+    with patch('paperweight.utils.load_dotenv', return_value=None):
+        with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValueError, match="Missing API key for openai"):
                 load_config(config_path=config_file)
 
@@ -105,13 +114,6 @@ def test_override_with_env():
     assert overridden['api_url'] == 'https://new-api.example.com'
     assert overridden['timeout'] == 60.5
 
-def test_load_config_missing_env_vars(config_file, sample_config):
-    sample_config['notifier']['email']['password'] = '$MISSING_VAR'
-    with open(config_file, 'w') as f:
-        yaml.dump(sample_config, f)
-    config = load_config(config_path=config_file)
-    assert config['notifier']['email']['password'] == '$MISSING_VAR'
-
 def test_check_arxiv_section():
     from paperweight.utils import _check_arxiv_section
     valid_config = {'categories': ['cs.AI'], 'max_results': 50}
@@ -126,12 +128,9 @@ def test_load_config_env_expansion_and_override(config_file, sample_config):
         yaml.dump(sample_config, f)
     with patch.dict(os.environ, {
         'ENV_MAX_RESULTS': '50',
-        'PAPERWEIGHT_MAX_RESULTS': '100'
+        'PAPERWEIGHT_MAX_RESULTS': '100',
+        'OPENAI_API_KEY': 'dummy_api_key'
     }):
         config = load_config(config_path=config_file)
     assert config['arxiv']['max_results'] == 100
-
-def test_load_config_logging(config_file):
-    with patch('paperweight.utils.logger') as mock_logger:
-        load_config(config_path=config_file)
-    mock_logger.info.assert_called_with("Configuration loaded and validated successfully")
+    assert config['analyzer']['api_key'] == 'dummy_api_key'

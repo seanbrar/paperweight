@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="paperweight",
-    version="0.1.0",
+    version="0.1.1",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=[
@@ -30,5 +30,5 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.7",
+    python_requires=">=3.10",
 )
