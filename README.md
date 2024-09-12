@@ -27,7 +27,7 @@ This project automatically retrieves, filters, and summarizes recent academic pa
 
 ### Prerequisites
 
-- Python 3.7 or higher
+- Python 3.10 or higher
 - Required Python packages:
   - pypdf
   - python-dotenv

@@ -22,7 +22,7 @@ Thank you for your interest in contributing to paperweight, a Python tool for co
 
 ## Development Setup
 
-1. Ensure you have Python 3.7 or higher installed.
+1. Ensure you have Python 3.10 or higher installed.
 2. Set up your development environment as described in the "Getting Started" section.
 3. Copy `config-base.yaml` to `config.yaml` and edit it with your preferences.
 4. Create a `.env` file in the project root and add your API keys if using the summarization functionality:
