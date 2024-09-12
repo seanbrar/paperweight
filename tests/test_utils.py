@@ -128,7 +128,9 @@ def test_load_config_env_expansion_and_override(config_file, sample_config):
         yaml.dump(sample_config, f)
     with patch.dict(os.environ, {
         'ENV_MAX_RESULTS': '50',
-        'PAPERWEIGHT_MAX_RESULTS': '100'
+        'PAPERWEIGHT_MAX_RESULTS': '100',
+        'OPENAI_API_KEY': 'dummy_api_key'
     }):
         config = load_config(config_path=config_file)
     assert config['arxiv']['max_results'] == 100
+    assert config['analyzer']['api_key'] == 'dummy_api_key'
