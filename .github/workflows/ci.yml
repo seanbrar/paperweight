@@ -43,7 +43,10 @@ jobs:
         pip install -e .
 
     - name: Run pre-commit hooks
-      uses: pre-commit/action@v3.0.0
+      run: |
+        pip install pre-commit
+        pre-commit run --all-files
+      timeout-minutes: 10
 
     - name: Run Pytest
       run: pytest
