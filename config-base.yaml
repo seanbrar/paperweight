@@ -7,7 +7,7 @@ arxiv:
     - cs.CL  # Computation and Language
     - cs.LG  # Machine Learning
     # - physics.comp-ph  # Computational Physics
-  max_results: 100  # Maximum number of papers to fetch per category
+  max_results: 100  # Maximum number of papers to fetch per category (0 for no limit)
 
 processor:
   keywords:
@@ -17,13 +17,14 @@ processor:
     - neural networks
     - artificial intelligence
   exclusion_keywords:
-    - exclude1
-    - exclude2
-    - exclude3
+    - quantum
+    - cryptography
+    - game theory
+    - data mining
   important_words:
-    - important1
-    - important2
-    - important3
+    - novel
+    - innovative
+    - state-of-the-art
   title_keyword_weight: 3
   abstract_keyword_weight: 2
   content_keyword_weight: 1
@@ -42,7 +43,8 @@ notifier:
     password: "YOUR_PASSWORD_HERE"
     smtp_server: "smtp.example.com"
     smtp_port: 587  # 465 | 587
+    sort_order: alphabetical  # alphabetical | publication_time | relevance
 
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
-  file: app.log  # app.log | /path/to/logfile.log
+  file: paperweight.log  # paperweight.log | /path/to/logfile.log

@@ -16,3 +16,9 @@ line-ending = "auto"
 
 [tool.mypy]
 mypy_path = "src"
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+markers = [
+    "integration: marks tests as integration tests",
+]

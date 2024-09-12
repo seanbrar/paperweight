@@ -6,17 +6,38 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-def process_papers(papers: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def process_papers(papers: List[Dict[str, Any]], processor_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     processed_papers = []
     for paper in papers:
-        score, score_breakdown = calculate_paper_score(paper, config)
-        if score >= config['min_score']:
+        score, score_breakdown = calculate_paper_score(paper, processor_config)
+        logger.debug(f"Paper '{paper['title']}' scored {score}")
+        if score >= processor_config['min_score']:
             paper['relevance_score'] = score
             paper['score_breakdown'] = score_breakdown
             processed_papers.append(paper)
+        else:
+            logger.debug(f"Paper '{paper['title']}' filtered out. Score {score} < min_score {processor_config['min_score']}")
 
     logger.debug(f"Processed {len(processed_papers)} papers out of {len(papers)}")
-    return sorted(processed_papers, key=lambda x: x['relevance_score'], reverse=True)
+
+    processed_papers = normalize_scores(processed_papers)
+    return sorted(processed_papers, key=lambda x: x['normalized_score'], reverse=True)
+
+def normalize_scores(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not papers:
+        return papers
+
+    max_score = max(paper['relevance_score'] for paper in papers)
+    min_score = min(paper['relevance_score'] for paper in papers)
+
+    for paper in papers:
+        if max_score != min_score:
+            paper['normalized_score'] = (paper['relevance_score'] - min_score) / (max_score - min_score)
+        else:
+            paper['normalized_score'] = 1.0
+
+    logger.debug("Normalized scores calculated")
+    return papers
 
 def calculate_paper_score(paper, config):
     score = 0

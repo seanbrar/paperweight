@@ -1,25 +1,15 @@
 import logging
-import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from dotenv import load_dotenv
 from SimplerLLM.language.llm import (  # type: ignore
     LLM,
     LLMProvider,
 )
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from paperweight.utils import count_tokens
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
-
-def get_api_key(provider: str) -> Optional[str]:
-    """Safely retrieve API key for the given provider."""
-    key = os.getenv(f'{provider.upper()}_API_KEY')
-    if not key:
-        logger.debug(f"No API key found for {provider}. Some functionality may be limited.")
-    return key
 
 def get_abstracts(processed_papers, config):
     analysis_type = config.get('type', 'abstract')
@@ -31,20 +21,19 @@ def get_abstracts(processed_papers, config):
     else:
         raise ValueError(f"Unknown analysis type: {analysis_type}")
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def summarize_paper(paper: Dict[str, Any], config: Dict[str, Any]) -> str:
     llm_provider = config.get('analyzer', {}).get('llm_provider', 'openai').lower()
+    api_key = config.get('analyzer', {}).get('api_key')
 
-    if llm_provider not in ['openai', 'gemini']:
-        logger.warning(f"Unsupported LLM provider: {llm_provider}. Falling back to abstract.")
-        return paper['abstract']
-
-    api_key = get_api_key(llm_provider)
-    if not api_key:
-        logger.warning(f"No API key available for {llm_provider}. Falling back to abstract.")
+    if llm_provider not in ['openai', 'gemini'] or not api_key:
+        logger.warning(f"No valid LLM provider or API key available for {llm_provider}. Falling back to abstract.")
         return paper['abstract']
 
     try:
-        llm_instance = create_llm_instance(llm_provider, api_key)
+        provider = LLMProvider[llm_provider.upper()]
+        model_name = 'gpt-4o-mini' if provider == LLMProvider.OPENAI else 'gemini-1.5-flash'
+        llm_instance = LLM.create(provider=provider, model_name=model_name, api_key=api_key)
         prompt = f"Write a concise, accurate summary of the following paper's content in about 3-5 sentences:\n\n```{paper['content']}```"
 
         input_tokens = count_tokens(prompt)

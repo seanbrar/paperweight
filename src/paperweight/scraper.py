@@ -6,10 +6,11 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 from pypdf import PdfReader
+from requests.exceptions import HTTPError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -17,7 +18,11 @@ from tenacity import (
     wait_exponential,
 )
 
-from paperweight.utils import load_config
+from paperweight.utils import (
+    get_last_processed_date,
+    load_config,
+    save_last_processed_date,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +31,30 @@ logger = logging.getLogger(__name__)
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout))
 )
-def fetch_arxiv_papers(category: str, start_date: date, max_results: int = 10) -> List[Dict[str, Any]]:
+def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+    logger.debug(f"Fetching arXiv papers for category '{category}' since {start_date}")
     base_url = "http://export.arxiv.org/api/query?"
     query = f"cat:{category}"
     params: Dict[str, Union[str, int]] = {
         "search_query": query,
         "start": 0,
-        "max_results": max_results,
         "sortBy": "submittedDate",
         "sortOrder": "descending"
     }
+    if max_results is not None and max_results > 0:
+        params["max_results"] = max_results
 
-    response = requests.get(base_url, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+    except HTTPError as http_err:
+        if response.status_code == 400 and "Invalid field: cat" in response.text:
+            logger.error(f"Invalid arXiv category: {category}. Please check your configuration.")
+            raise ValueError(f"Invalid arXiv category: {category}. Please check your configuration.") from http_err
+        else:
+            logger.error(f"HTTP error occurred: {http_err}")
+            raise
+
     root = ET.fromstring(response.content)
 
     papers = []
@@ -66,6 +82,7 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: int = 10) -
         logger.debug(f"Paper '{title}' submitted on {submitted_date}")
 
         if submitted_date < start_date:
+            logger.debug(f"Stopping fetch: paper date {submitted_date} is before start date {start_date}")
             break
 
         papers.append({
@@ -75,51 +92,73 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: int = 10) -
             "abstract": abstract
         })
 
-    logger.debug(f"Fetched {len(papers)} papers for category '{category}'")
+        if max_results is not None and max_results > 0 and len(papers) >= max_results:
+            logger.debug(f"Reached max_results limit of {max_results}")
+            break
+
+    logger.info(f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}")
     return papers
 
-def fetch_recent_papers(days=1, max_days=7):
+def fetch_recent_papers(start_days=1):
     config = load_config()
     categories = config['arxiv']['categories']
-    start_date = datetime.now().date() - timedelta(days=days)
+    max_results = config['arxiv'].get('max_results', 0)  # Default to 0 if not set
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=start_days)
+
+    logger.info(f"Fetching papers from {start_date} to {end_date}")
 
     all_papers = []
     processed_ids = set()
 
-    while days <= max_days:
-        for category in categories:
-            papers = fetch_arxiv_papers(category, start_date, max_results=config['arxiv']['max_results'])
-            for paper in papers:
-                paper_id = paper['link'].split('/abs/')[-1]
-                if paper_id not in processed_ids:
-                    all_papers.append(paper)
-                    processed_ids.add(paper_id)
+    for category in categories:
+        logger.info(f"Processing category: {category}")
+        try:
+            papers = fetch_arxiv_papers(category, start_date, max_results=max_results if max_results > 0 else None)
+            new_papers = [paper for paper in papers if paper['link'].split('/abs/')[-1] not in processed_ids]
+            processed_ids.update(paper['link'].split('/abs/')[-1] for paper in new_papers)
 
-        if all_papers:
-            break
+            if max_results > 0:
+                new_papers = new_papers[:max_results]
 
-        days += 1
-        start_date = datetime.now().date() - timedelta(days=days)
-        # Current approach to handle weekends and other non-working days
-        logger.debug(f"No papers found, increasing date range to last {days} days")
+            all_papers.extend(new_papers)
+            logger.debug(f"Added {len(new_papers)} new papers from category {category}")
+        except ValueError as ve:
+            logger.error(f"Error fetching papers for category {category}: {ve}")
+            continue
 
-    logger.debug(f"Total recent papers fetched: {len(all_papers)}")
+    logger.info(f"Fetched a total of {len(all_papers)} papers")
     return all_papers
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, requests.RequestException))
+)
 def fetch_paper_content(paper_id):
+    logger.debug(f"Fetching content for paper ID: {paper_id}")
     source_url = f'http://export.arxiv.org/e-print/{paper_id}'
     pdf_url = f'https://export.arxiv.org/pdf/{paper_id}'
 
-    # Try to fetch source first
-    response = requests.get(source_url)
-    if response.status_code == 200:
+    try:
+        # Try to fetch source first
+        response = requests.get(source_url, timeout=30)
+        response.raise_for_status()
+        logger.debug(f"Successfully fetched source for paper ID: {paper_id}")
         return response.content, 'source'
+    except requests.RequestException as e:
+        logger.warning(f"Failed to fetch source for paper ID: {paper_id}. Error: {e}")
 
-    # If source is not available, try PDF
-    response = requests.get(pdf_url)
-    if response.status_code == 200:
+    try:
+        # If source is not available, try PDF
+        response = requests.get(pdf_url, timeout=30)
+        response.raise_for_status()
+        logger.debug(f"Successfully fetched PDF for paper ID: {paper_id}")
         return response.content, 'pdf'
+    except requests.RequestException as e:
+        logger.warning(f"Failed to fetch PDF for paper ID: {paper_id}. Error: {e}")
 
+    logger.error(f"Failed to fetch content for paper ID: {paper_id}")
     return None, None
 
 def extract_text_from_pdf(pdf_content):
@@ -131,6 +170,9 @@ def extract_text_from_pdf(pdf_content):
     return text
 
 def extract_text_from_source(content, method):
+    if method not in ['pdf', 'source']:
+        raise ValueError(f"Invalid source type: {method}")
+
     if method == 'pdf':
         return extract_text_from_pdf(content)
 
@@ -164,17 +206,49 @@ def extract_text_from_source(content, method):
 
 def fetch_paper_contents(paper_ids):
     contents = []
+    total_papers = len(paper_ids)
+    logger.info(f"Fetching content for {total_papers} papers")
     for i, paper_id in enumerate(paper_ids):
-        content, method = fetch_paper_content(paper_id)
-        contents.append((paper_id, content, method))
+        try:
+            content, method = fetch_paper_content(paper_id)
+            contents.append((paper_id, content, method))
+        except Exception as e:
+            logger.error(f"Error fetching content for paper ID {paper_id}: {e}")
+            contents.append((paper_id, None, None))
 
         if (i + 1) % 4 == 0:
             time.sleep(1)
-            print("Waiting 1 second...")
+            logger.debug(f"Processed {i + 1}/{total_papers} papers. Waiting 1 second...")
+
+        if (i + 1) % 20 == 0:
+            logger.info(f"Processed {i + 1}/{total_papers} papers")
+
+    logger.info(f"Finished fetching content for all {total_papers} papers")
     return contents
 
-def get_recent_papers(days=1):
+def get_recent_papers(force_refresh=False):
+    last_processed_date = get_last_processed_date()
+    logger.info(f"Last processed date: {last_processed_date}")
+    current_date = datetime.now().date()
+    logger.info(f"Current date: {current_date}")
+
+    if last_processed_date is None or force_refresh:
+        # If never run before, fetch papers from the last 7 days
+        days = 7
+        logger.info("First run detected. Fetching papers from the last 7 days.")
+    else:
+        days = (current_date - last_processed_date).days
+        if days == 0:
+            logger.info("Already processed papers for today. No new papers to fetch.")
+            return []
+        elif days > 7:
+            # If more than a week has passed, limit to 7 days to avoid overload
+            days = 7
+            logger.warning(f"More than a week since last run. Limiting fetch to last {days} days.")
+
+    logger.info(f"Fetching papers for the last {days} days")
     recent_papers = fetch_recent_papers(days)
+    logger.info(f"Fetched {len(recent_papers)} recent papers")
     paper_ids = [paper['link'].split('/abs/')[-1] for paper in recent_papers]
 
     contents = fetch_paper_contents(paper_ids)
@@ -182,6 +256,7 @@ def get_recent_papers(days=1):
     papers_with_content = []
     for paper, (paper_id, content, method) in zip(recent_papers, contents):
         if content:
+            logger.debug(f"Extracting text for paper ID: {paper_id}")
             text = extract_text_from_source(content, method)
 
             papers_with_content.append({
@@ -194,9 +269,12 @@ def get_recent_papers(days=1):
                 "content_type": method
             })
 
+    if papers_with_content:
+        save_last_processed_date(current_date)
+        logger.info(f"Processed {len(papers_with_content)} papers. Last processed date updated to {current_date}")
+    else:
+        logger.info("No new papers found.")
+
+    logger.info(f"Returning {len(papers_with_content)} papers with content")
     return papers_with_content
 
-def date_serializer(obj):
-    if isinstance(obj, date):
-        return obj.isoformat()
-    raise TypeError(f"Type {type(obj)} not serializable")

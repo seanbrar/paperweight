@@ -3,6 +3,7 @@
 .paux
 *.log
 config.yaml
+last_processed_date.txt
 
 # Build artifacts
 build/

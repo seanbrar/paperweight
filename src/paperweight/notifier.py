@@ -29,16 +29,32 @@ def send_email_notification(subject, body, config):
         server.sendmail(from_email, to_email, text)
         server.quit()
         logger.info("Email sent successfully")
+        return True
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
+        return False
 
 def compile_and_send_notifications(papers, config):
+    if not papers:
+        logger.info("No papers to send notifications for.")
+        return
+
+    sort_order = config.get('email', {}).get('sort_order', 'relevance')
+
+    if sort_order == 'alphabetical':
+        papers = sorted(papers, key=lambda x: x['title'].lower())
+    elif sort_order == 'publication_time':
+        papers = sorted(papers, key=lambda x: x['date'], reverse=True)
+    # For 'relevance' or any other value, we keep the existing order (already sorted by relevance)
+
     subject = "New Papers from ArXiv"
     body = "Here are the latest papers:\n\n"
     for paper in papers:
         body += f"Title: {paper['title']}\n"
         body += f"Date: {paper['date']}\n"
         body += f"Summary: {paper['summary']}\n"
-        body += f"Link: {paper['link']}\n\n"
+        body += f"Link: {paper['link']}\n"
+        body += f"Relevance Score: {paper['relevance_score']:.2f}\n\n"
 
-    send_email_notification(subject, body, config)
+    success = send_email_notification(subject, body, config)
+    return success
