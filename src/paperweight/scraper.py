@@ -1,3 +1,10 @@
+"""Module for fetching and processing arXiv papers.
+
+This module handles all interactions with the arXiv API, including fetching paper metadata,
+downloading PDFs, and extracting text content. It includes retry mechanisms for robust
+API interactions and various methods for processing paper content.
+"""
+
 import gzip
 import io
 import logging
@@ -26,12 +33,29 @@ from paperweight.utils import (
 
 logger = logging.getLogger(__name__)
 
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout))
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
 )
-def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+def fetch_arxiv_papers(
+    category: str, start_date: date, max_results: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """Fetch papers from arXiv API for a specific category and date range.
+
+    Args:
+        category: The arXiv category to fetch papers from (e.g., 'cs.AI').
+        start_date: The date from which to start fetching papers.
+        max_results: Optional maximum number of results to return.
+
+    Returns:
+        List of dictionaries containing paper metadata.
+
+    Raises:
+        requests.ConnectionError: If connection to arXiv API fails.
+        requests.Timeout: If the request times out.
+    """
     logger.debug(f"Fetching arXiv papers for category '{category}' since {start_date}")
     base_url = "http://export.arxiv.org/api/query?"
     query = f"cat:{category}"
@@ -39,7 +63,7 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[in
         "search_query": query,
         "start": 0,
         "sortBy": "submittedDate",
-        "sortOrder": "descending"
+        "sortOrder": "descending",
     }
     if max_results is not None and max_results > 0:
         params["max_results"] = max_results
@@ -49,8 +73,12 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[in
         response.raise_for_status()
     except HTTPError as http_err:
         if response.status_code == 400 and "Invalid field: cat" in response.text:
-            logger.error(f"Invalid arXiv category: {category}. Please check your configuration.")
-            raise ValueError(f"Invalid arXiv category: {category}. Please check your configuration.") from http_err
+            logger.error(
+                f"Invalid arXiv category: {category}. Please check your configuration."
+            )
+            raise ValueError(
+                f"Invalid arXiv category: {category}. Please check your configuration."
+            ) from http_err
         else:
             logger.error(f"HTTP error occurred: {http_err}")
             raise
@@ -58,13 +86,18 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[in
     root = ET.fromstring(response.content)
 
     papers = []
-    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
-        title_elem = entry.find('{http://www.w3.org/2005/Atom}title')
-        link_elem = entry.find('{http://www.w3.org/2005/Atom}id')
-        published_elem = entry.find('{http://www.w3.org/2005/Atom}published')
-        summary_elem = entry.find('{http://www.w3.org/2005/Atom}summary')
+    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+        title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
+        link_elem = entry.find("{http://www.w3.org/2005/Atom}id")
+        published_elem = entry.find("{http://www.w3.org/2005/Atom}published")
+        summary_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
 
-        if title_elem is None or link_elem is None or published_elem is None or summary_elem is None:
+        if (
+            title_elem is None
+            or link_elem is None
+            or published_elem is None
+            or summary_elem is None
+        ):
             logger.warning("Skipping entry due to missing required elements")
             continue
 
@@ -82,27 +115,37 @@ def fetch_arxiv_papers(category: str, start_date: date, max_results: Optional[in
         logger.debug(f"Paper '{title}' submitted on {submitted_date}")
 
         if submitted_date < start_date:
-            logger.debug(f"Stopping fetch: paper date {submitted_date} is before start date {start_date}")
+            logger.debug(
+                f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+            )
             break
 
-        papers.append({
-            "title": title,
-            "link": link,
-            "date": submitted_date,
-            "abstract": abstract
-        })
+        papers.append(
+            {"title": title, "link": link, "date": submitted_date, "abstract": abstract}
+        )
 
         if max_results is not None and max_results > 0 and len(papers) >= max_results:
             logger.debug(f"Reached max_results limit of {max_results}")
             break
 
-    logger.info(f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}")
+    logger.info(
+        f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}"
+    )
     return papers
 
+
 def fetch_recent_papers(start_days=1):
+    """Fetch papers published within the last specified number of days.
+
+    Args:
+        start_days: Number of days to look back for papers.
+
+    Returns:
+        List of dictionaries containing paper metadata.
+    """
     config = load_config()
-    categories = config['arxiv']['categories']
-    max_results = config['arxiv'].get('max_results', 0)  # Default to 0 if not set
+    categories = config["arxiv"]["categories"]
+    max_results = config["arxiv"].get("max_results", 0)  # Default to 0 if not set
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=start_days)
 
@@ -114,9 +157,19 @@ def fetch_recent_papers(start_days=1):
     for category in categories:
         logger.info(f"Processing category: {category}")
         try:
-            papers = fetch_arxiv_papers(category, start_date, max_results=max_results if max_results > 0 else None)
-            new_papers = [paper for paper in papers if paper['link'].split('/abs/')[-1] not in processed_ids]
-            processed_ids.update(paper['link'].split('/abs/')[-1] for paper in new_papers)
+            papers = fetch_arxiv_papers(
+                category,
+                start_date,
+                max_results=max_results if max_results > 0 else None,
+            )
+            new_papers = [
+                paper
+                for paper in papers
+                if paper["link"].split("/abs/")[-1] not in processed_ids
+            ]
+            processed_ids.update(
+                paper["link"].split("/abs/")[-1] for paper in new_papers
+            )
 
             if max_results > 0:
                 new_papers = new_papers[:max_results]
@@ -130,22 +183,38 @@ def fetch_recent_papers(start_days=1):
     logger.info(f"Fetched a total of {len(all_papers)} papers")
     return all_papers
 
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, requests.RequestException))
+    retry=retry_if_exception_type(
+        (requests.ConnectionError, requests.Timeout, requests.RequestException)
+    ),
 )
 def fetch_paper_content(paper_id):
+    """Fetch the content of a specific paper from arXiv.
+
+    Args:
+        paper_id: The arXiv ID of the paper to fetch.
+
+    Returns:
+        Tuple of (content, method) where method indicates the source type.
+
+    Raises:
+        requests.ConnectionError: If connection to arXiv fails.
+        requests.Timeout: If the request times out.
+        requests.RequestException: For other request-related errors.
+    """
     logger.debug(f"Fetching content for paper ID: {paper_id}")
-    source_url = f'http://export.arxiv.org/e-print/{paper_id}'
-    pdf_url = f'https://export.arxiv.org/pdf/{paper_id}'
+    source_url = f"http://export.arxiv.org/e-print/{paper_id}"
+    pdf_url = f"https://export.arxiv.org/pdf/{paper_id}"
 
     try:
         # Try to fetch source first
         response = requests.get(source_url, timeout=30)
         response.raise_for_status()
         logger.debug(f"Successfully fetched source for paper ID: {paper_id}")
-        return response.content, 'source'
+        return response.content, "source"
     except requests.RequestException as e:
         logger.warning(f"Failed to fetch source for paper ID: {paper_id}. Error: {e}")
 
@@ -154,14 +223,23 @@ def fetch_paper_content(paper_id):
         response = requests.get(pdf_url, timeout=30)
         response.raise_for_status()
         logger.debug(f"Successfully fetched PDF for paper ID: {paper_id}")
-        return response.content, 'pdf'
+        return response.content, "pdf"
     except requests.RequestException as e:
         logger.warning(f"Failed to fetch PDF for paper ID: {paper_id}. Error: {e}")
 
     logger.error(f"Failed to fetch content for paper ID: {paper_id}")
     return None, None
 
+
 def extract_text_from_pdf(pdf_content):
+    """Extract text content from a PDF file.
+
+    Args:
+        pdf_content: Binary content of the PDF file.
+
+    Returns:
+        Extracted text as a string.
+    """
     pdf_file = io.BytesIO(pdf_content)
     pdf_reader = PdfReader(pdf_file)
     text = ""
@@ -169,11 +247,21 @@ def extract_text_from_pdf(pdf_content):
         text += page.extract_text()
     return text
 
+
 def extract_text_from_source(content, method):
-    if method not in ['pdf', 'source']:
+    """Extract text from various source formats.
+
+    Args:
+        content: The content to extract text from.
+        method: The method to use for extraction ('pdf' or 'source').
+
+    Returns:
+        Extracted text as a string.
+    """
+    if method not in ["pdf", "source"]:
         raise ValueError(f"Invalid source type: {method}")
 
-    if method == 'pdf':
+    if method == "pdf":
         return extract_text_from_pdf(content)
 
     # Try to decompress gzip content
@@ -190,11 +278,11 @@ def extract_text_from_source(content, method):
             for member in tar.getmembers():
                 if member.isfile():
                     _, ext = os.path.splitext(member.name)
-                    if ext.lower() in ['.tex', '.txt', '.log']:
+                    if ext.lower() in [".tex", ".txt", ".log"]:
                         f = tar.extractfile(member)
                         if f:
-                            text += f.read().decode('utf-8', errors='ignore')
-                    elif ext.lower() in ['.png', '.jpg', '.jpeg']:
+                            text += f.read().decode("utf-8", errors="ignore")
+                    elif ext.lower() in [".png", ".jpg", ".jpeg"]:
                         # Optionally log the presence of image files
                         logger.debug(f"Skipping image file: {member.name}")
                     else:
@@ -202,9 +290,18 @@ def extract_text_from_source(content, method):
             return text
     else:
         # If it's not a tar file, assume it's a single file
-        return decompressed.decode('utf-8', errors='ignore')
+        return decompressed.decode("utf-8", errors="ignore")
+
 
 def fetch_paper_contents(paper_ids):
+    """Fetch contents for multiple papers in parallel.
+
+    Args:
+        paper_ids: List of arXiv paper IDs to fetch.
+
+    Returns:
+        Dictionary mapping paper IDs to their content.
+    """
     contents = []
     total_papers = len(paper_ids)
     logger.info(f"Fetching content for {total_papers} papers")
@@ -218,7 +315,9 @@ def fetch_paper_contents(paper_ids):
 
         if (i + 1) % 4 == 0:
             time.sleep(1)
-            logger.debug(f"Processed {i + 1}/{total_papers} papers. Waiting 1 second...")
+            logger.debug(
+                f"Processed {i + 1}/{total_papers} papers. Waiting 1 second..."
+            )
 
         if (i + 1) % 20 == 0:
             logger.info(f"Processed {i + 1}/{total_papers} papers")
@@ -226,7 +325,16 @@ def fetch_paper_contents(paper_ids):
     logger.info(f"Finished fetching content for all {total_papers} papers")
     return contents
 
+
 def get_recent_papers(force_refresh=False):
+    """Get recent papers, either from cache or by fetching new ones.
+
+    Args:
+        force_refresh: If True, ignore cache and fetch new papers.
+
+    Returns:
+        List of dictionaries containing paper metadata.
+    """
     last_processed_date = get_last_processed_date()
     logger.info(f"Last processed date: {last_processed_date}")
     current_date = datetime.now().date()
@@ -244,12 +352,14 @@ def get_recent_papers(force_refresh=False):
         elif days > 7:
             # If more than a week has passed, limit to 7 days to avoid overload
             days = 7
-            logger.warning(f"More than a week since last run. Limiting fetch to last {days} days.")
+            logger.warning(
+                f"More than a week since last run. Limiting fetch to last {days} days."
+            )
 
     logger.info(f"Fetching papers for the last {days} days")
     recent_papers = fetch_recent_papers(days)
     logger.info(f"Fetched {len(recent_papers)} recent papers")
-    paper_ids = [paper['link'].split('/abs/')[-1] for paper in recent_papers]
+    paper_ids = [paper["link"].split("/abs/")[-1] for paper in recent_papers]
 
     contents = fetch_paper_contents(paper_ids)
 
@@ -259,22 +369,25 @@ def get_recent_papers(force_refresh=False):
             logger.debug(f"Extracting text for paper ID: {paper_id}")
             text = extract_text_from_source(content, method)
 
-            papers_with_content.append({
-                "id": paper_id,
-                "title": paper['title'],
-                "link": paper['link'],
-                "date": paper['date'],
-                "abstract": paper['abstract'],
-                "content": text,
-                "content_type": method
-            })
+            papers_with_content.append(
+                {
+                    "id": paper_id,
+                    "title": paper["title"],
+                    "link": paper["link"],
+                    "date": paper["date"],
+                    "abstract": paper["abstract"],
+                    "content": text,
+                    "content_type": method,
+                }
+            )
 
     if papers_with_content:
         save_last_processed_date(current_date)
-        logger.info(f"Processed {len(papers_with_content)} papers. Last processed date updated to {current_date}")
+        logger.info(
+            f"Processed {len(papers_with_content)} papers. Last processed date updated to {current_date}"
+        )
     else:
         logger.info("No new papers found.")
 
     logger.info(f"Returning {len(papers_with_content)} papers with content")
     return papers_with_content
-

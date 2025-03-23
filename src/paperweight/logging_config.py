@@ -1,44 +1,63 @@
+"""Module for configuring logging in the paperweight application.
+
+This module provides functionality for setting up logging with both file and console
+handlers, configurable log levels, and standardized formatting. It ensures log directories
+exist and handles invalid logging level configurations gracefully.
+"""
+
 import logging
 import logging.config
 import os
 
 
 def setup_logging(logging_config):
-    valid_levels = {'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'}
-    logging_level = logging_config.get('level', 'INFO').upper()
-    if logging_level not in valid_levels:
-        logging_level = 'INFO'
+    """Set up logging configuration for the application.
 
-    log_file = logging_config['file']
+    Args:
+        logging_config: Dictionary containing logging configuration parameters including
+                       'level' and 'file' settings.
+
+    The function configures both file and console handlers with the following features:
+    - Console handler with WARNING and above levels
+    - File handler with the configured level (defaults to INFO)
+    - Standard format: timestamp - logger_name - level - message
+    - Automatic creation of log directory if it doesn't exist
+    """
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    logging_level = logging_config.get("level", "INFO").upper()
+    if logging_level not in valid_levels:
+        logging_level = "INFO"
+
+    log_file = logging_config["file"]
     log_dir = os.path.dirname(log_file)
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
 
     logging_config = {
-        'version': 1,
-        'disable_existing_loggers': False,
-        'formatters': {
-            'standard': {
-                'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                'datefmt': '%Y-%m-%d %H:%M:%S'
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
-        'handlers': {
-            'console': {
-                'class': 'logging.StreamHandler',
-                'formatter': 'standard',
-                'level': 'WARNING',
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "level": "WARNING",
             },
-            'file': {
-                'class': 'logging.FileHandler',
-                'filename': log_file,
-                'formatter': 'standard',
-                'level': logging_level,
+            "file": {
+                "class": "logging.FileHandler",
+                "filename": log_file,
+                "formatter": "standard",
+                "level": logging_level,
             },
         },
-        'root': {
-            'handlers': ['console', 'file'],
-            'level': logging_level,
+        "root": {
+            "handlers": ["console", "file"],
+            "level": logging_level,
         },
     }
     logging.config.dictConfig(logging_config)
