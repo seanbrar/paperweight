@@ -1,3 +1,10 @@
+"""Main module for the paperweight application.
+
+This module serves as the entry point for the paperweight application, coordinating
+the paper fetching, processing, analysis, and notification processes. It handles
+configuration loading, logging setup, and the main execution flow of the application.
+"""
+
 import argparse
 import logging
 import traceback
@@ -14,9 +21,20 @@ from paperweight.utils import load_config
 
 logger = logging.getLogger(__name__)
 
+
 def setup_and_get_papers(force_refresh):
+    """Set up the application and fetch papers.
+
+    Args:
+        force_refresh: Boolean indicating whether to ignore the last processed date
+                      and fetch all papers within the configured time window.
+
+    Returns:
+        Tuple of (papers, config) where papers is a list of paper dictionaries and
+        config is the loaded configuration dictionary.
+    """
     config = load_config()
-    setup_logging(config['logging'])
+    setup_logging(config["logging"])
     logger.info("Configuration loaded successfully")
 
     if force_refresh:
@@ -25,27 +43,54 @@ def setup_and_get_papers(force_refresh):
     else:
         return get_recent_papers(), config
 
+
 def process_and_summarize_papers(recent_papers, config):
+    """Process and analyze papers based on configured criteria.
+
+    Args:
+        recent_papers: List of paper dictionaries to process.
+        config: Configuration dictionary containing processing parameters.
+
+    Returns:
+        List of processed papers with relevance scores and summaries.
+    """
     if not recent_papers:
         logger.info("No new papers to process. Exiting.")
         return None
 
-    processed_papers = process_papers(recent_papers, config['processor'])
+    processed_papers = process_papers(recent_papers, config["processor"])
     logger.info(f"Processed {len(processed_papers)} papers")
 
     if not processed_papers:
         logger.info("No papers met the relevance criteria. Exiting.")
         return None
 
-    summaries = get_abstracts(processed_papers, config['analyzer'])
+    summaries = get_abstracts(processed_papers, config["analyzer"])
     for paper, summary in zip(processed_papers, summaries):
-        paper['summary'] = summary if summary else paper.get('abstract', 'No summary available')
+        paper["summary"] = (
+            summary if summary else paper.get("abstract", "No summary available")
+        )
 
     return processed_papers
 
+
 def main():
-    parser = argparse.ArgumentParser(description="paperweight: Fetch and process arXiv papers")
-    parser.add_argument('--force-refresh', action='store_true', help='Force refresh papers regardless of last processed date')
+    """Main entry point for the paperweight application.
+
+    This function parses command line arguments, coordinates the paper processing
+    pipeline, and handles any errors that occur during execution.
+
+    Returns:
+        0 on successful execution, 1 on error.
+    """
+    parser = argparse.ArgumentParser(
+        description="paperweight: Fetch and process arXiv papers"
+    )
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Force refresh papers regardless of last processed date",
+    )
     args = parser.parse_args()
 
     try:
@@ -53,7 +98,9 @@ def main():
         processed_papers = process_and_summarize_papers(recent_papers, config)
 
         if processed_papers:
-            notification_sent = compile_and_send_notifications(processed_papers, config['notifier'])
+            notification_sent = compile_and_send_notifications(
+                processed_papers, config["notifier"]
+            )
             if notification_sent:
                 logger.info("Notifications compiled and sent successfully")
             else:
@@ -68,6 +115,7 @@ def main():
         logger.error(f"Configuration validation error: {e}")
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
+
 
 if __name__ == "__main__":
     try:

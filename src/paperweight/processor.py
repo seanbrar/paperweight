@@ -1,3 +1,10 @@
+"""Module for processing and scoring academic papers.
+
+This module handles the processing of papers including scoring based on relevance criteria,
+keyword matching, and importance weighting. It provides functionality for filtering papers
+based on minimum score thresholds and normalizing scores across multiple papers.
+"""
+
 import logging
 import math
 import re
@@ -6,80 +13,152 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-def process_papers(papers: List[Dict[str, Any]], processor_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+
+def process_papers(
+    papers: List[Dict[str, Any]], processor_config: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Process and score a list of papers based on configured criteria.
+
+    Args:
+        papers: List of dictionaries containing paper data.
+        processor_config: Configuration dictionary containing scoring parameters and thresholds.
+
+    Returns:
+        List of processed papers with relevance scores, sorted by normalized score.
+    """
     processed_papers = []
     for paper in papers:
         score, score_breakdown = calculate_paper_score(paper, processor_config)
         logger.debug(f"Paper '{paper['title']}' scored {score}")
-        if score >= processor_config['min_score']:
-            paper['relevance_score'] = score
-            paper['score_breakdown'] = score_breakdown
+        if score >= processor_config["min_score"]:
+            paper["relevance_score"] = score
+            paper["score_breakdown"] = score_breakdown
             processed_papers.append(paper)
         else:
-            logger.debug(f"Paper '{paper['title']}' filtered out. Score {score} < min_score {processor_config['min_score']}")
+            logger.debug(
+                f"Paper '{paper['title']}' filtered out. Score {score} < min_score {processor_config['min_score']}"
+            )
 
     logger.debug(f"Processed {len(processed_papers)} papers out of {len(papers)}")
 
     processed_papers = normalize_scores(processed_papers)
-    return sorted(processed_papers, key=lambda x: x['normalized_score'], reverse=True)
+    return sorted(processed_papers, key=lambda x: x["normalized_score"], reverse=True)
+
 
 def normalize_scores(papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize relevance scores across all papers to a 0-1 scale.
+
+    Args:
+        papers: List of dictionaries containing paper data with relevance scores.
+
+    Returns:
+        List of papers with added normalized_score field.
+    """
     if not papers:
         return papers
 
-    max_score = max(paper['relevance_score'] for paper in papers)
-    min_score = min(paper['relevance_score'] for paper in papers)
+    max_score = max(paper["relevance_score"] for paper in papers)
+    min_score = min(paper["relevance_score"] for paper in papers)
 
     for paper in papers:
         if max_score != min_score:
-            paper['normalized_score'] = (paper['relevance_score'] - min_score) / (max_score - min_score)
+            paper["normalized_score"] = (paper["relevance_score"] - min_score) / (
+                max_score - min_score
+            )
         else:
-            paper['normalized_score'] = 1.0
+            paper["normalized_score"] = 1.0
 
     logger.debug("Normalized scores calculated")
     return papers
 
+
 def calculate_paper_score(paper, config):
+    """Calculate a relevance score for a paper based on configured criteria.
+
+    Args:
+        paper: Dictionary containing paper data including content and metadata.
+        config: Configuration dictionary containing scoring parameters.
+
+    Returns:
+        Tuple of (total_score, score_breakdown) where score_breakdown is a dictionary
+        containing individual component scores.
+    """
     score = 0
     score_breakdown = {}
     # Keyword matching
-    title_keywords = count_keywords(paper['title'], config['keywords'])
-    abstract_keywords = count_keywords(paper['abstract'], config['keywords'])
-    content_keywords = count_keywords(paper['content'], config['keywords'])
+    title_keywords = count_keywords(paper["title"], config["keywords"])
+    abstract_keywords = count_keywords(paper["abstract"], config["keywords"])
+    content_keywords = count_keywords(paper["content"], config["keywords"])
 
     max_title_score = 50
     max_abstract_score = 50
     max_content_score = 25
 
-    title_score = min(title_keywords * config['title_keyword_weight'], max_title_score)
-    abstract_score = min(abstract_keywords * config['abstract_keyword_weight'], max_abstract_score)
-    content_score = min(content_keywords * config['content_keyword_weight'], max_content_score)
+    title_score = min(title_keywords * config["title_keyword_weight"], max_title_score)
+    abstract_score = min(
+        abstract_keywords * config["abstract_keyword_weight"], max_abstract_score
+    )
+    content_score = min(
+        content_keywords * config["content_keyword_weight"], max_content_score
+    )
 
     score += title_score + abstract_score + content_score
-    score_breakdown['keyword_matching'] = {
-        'title': round(title_score, 2),
-        'abstract': round(abstract_score, 2),
-        'content': round(content_score, 2)
+    score_breakdown["keyword_matching"] = {
+        "title": round(title_score, 2),
+        "abstract": round(abstract_score, 2),
+        "content": round(content_score, 2),
     }
 
     # Exclusion list
-    exclusion_count = count_keywords(paper['content'], config['exclusion_keywords'])
-    exclusion_score = min(exclusion_count * config['exclusion_keyword_penalty'], max_content_score)
+    exclusion_count = count_keywords(paper["content"], config["exclusion_keywords"])
+    exclusion_score = min(
+        exclusion_count * config["exclusion_keyword_penalty"], max_content_score
+    )
     score -= exclusion_score
-    score_breakdown['exclusion_penalty'] = -round(exclusion_score, 2)
+    score_breakdown["exclusion_penalty"] = -round(exclusion_score, 2)
 
     # Simple text analysis
-    important_word_count = count_important_words(paper['content'], config['important_words'])
-    important_word_score = min(important_word_count * config['important_words_weight'], max_content_score)
+    important_word_count = count_important_words(
+        paper["content"], config["important_words"]
+    )
+    important_word_score = min(
+        important_word_count * config["important_words_weight"], max_content_score
+    )
     score += important_word_score
-    score_breakdown['important_words'] = round(important_word_score, 2)
+    score_breakdown["important_words"] = round(important_word_score, 2)
 
-    return max(score, 0), score_breakdown # Ensure score is not negative
+    return max(score, 0), score_breakdown  # Ensure score is not negative
+
 
 def count_keywords(text, keywords):
-    return sum(math.log(text.lower().count(keyword.lower()) + 1) for keyword in keywords)
+    """Count occurrences of keywords in text.
+
+    Args:
+        text: The text to search in.
+        keywords: List of keywords to count.
+
+    Returns:
+        Dictionary mapping keywords to their occurrence counts.
+    """
+    return sum(
+        math.log(text.lower().count(keyword.lower()) + 1) for keyword in keywords
+    )
+
 
 def count_important_words(text, important_words):
-    words = re.findall(r'\w+', text.lower())
+    """Count occurrences of important words in text.
+
+    Args:
+        text: The text to search in.
+        important_words: List of important words to count.
+
+    Returns:
+        Dictionary mapping important words to their occurrence counts.
+    """
+    words = re.findall(r"\w+", text.lower())
     word_counts = Counter(words)
-    return sum(math.log(word_counts[word.lower()] + 1) for word in important_words if word.lower() in word_counts)
+    return sum(
+        math.log(word_counts[word.lower()] + 1)
+        for word in important_words
+        if word.lower() in word_counts
+    )

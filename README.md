@@ -1,14 +1,28 @@
 # paperweight
 
-This project automatically retrieves, filters, and summarizes recent academic papers from arXiv based on user-specified categories, then sends notifications to the user.
+A scalable system for retrieving, filtering, and summarizing academic papers from arXiv based on user preferences, with customizable notifications.
 
 ## Features
 
 - **ArXiv Integration**: Fetches recent papers from arXiv using their API, ensuring up-to-date access to the latest research.
 - **Customizable Filtering**: Filters papers based on user-defined preferences, including keywords, categories, and exclusion criteria.
-- **Intelligent Summarization** (BETA): Generates concise summaries or extracts abstracts, providing quick insights into paper content. Note: This feature is currently in beta and may have some limitations.
+- **Intelligent Summarization** (BETA): Generates concise summaries or extracts abstracts, providing quick insights into paper content.
 - **Flexible Notification System**: Notifies users via email, with potential for expansion to other notification methods.
 - **Configurable Settings**: Allows users to fine-tune the application's behavior through a YAML configuration file.
+
+## System Architecture
+
+```
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│    SCRAPER    │────▶│   PROCESSOR   │────▶│   ANALYZER    │────▶│   NOTIFIER    │
+└───────────────┘     └───────────────┘     └───────────────┘     └───────────────┘
+        │                     │                     │                     │
+        ▼                     ▼                     ▼                     ▼
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│ arXiv API &   │     │ Scoring &     │     │ Abstract      │     │ Email &       │
+│ PDF Processing│     │ Filtering     │     │ Extraction    │     │ Templating    │
+└───────────────┘     └───────────────┘     └───────────────┘     └───────────────┘
+```
 
 ## Table of Contents
 - [Getting Started](#getting-started)
@@ -17,6 +31,7 @@ This project automatically retrieves, filters, and summarizes recent academic pa
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [FAQ and Troubleshooting](#faq-and-troubleshooting)
+- [Technical Details](#technical-details)
 - [Roadmap](#roadmap)
 - [Glossary](#glossary)
 - [License](#license)
@@ -29,11 +44,13 @@ This project automatically retrieves, filters, and summarizes recent academic pa
 
 - Python 3.10 or higher
 - Required Python packages:
-  - pypdf
-  - python-dotenv
-  - PyYAML
-  - requests
-  - simplerllm
+  - pypdf - For PDF document processing
+  - python-dotenv - For environment variable management
+  - PyYAML - For configuration parsing
+  - requests - For API communication
+  - simplerllm - For LLM integration
+  - tenacity - For resilient API interactions
+  - tiktoken - For token counting
 
 ## Installation
 
@@ -98,14 +115,41 @@ For a comprehensive list of frequently asked questions, including setup instruct
 
 If you can't find an answer to your question or solution to your problem in the FAQ, please [open an issue](https://github.com/seanbrar/paperweight/issues) on GitHub.
 
+## Technical Details
+
+### Processing Pipeline
+
+paperweight processes papers through four main stages:
+
+1. **Scraping** (`scraper.py`): Fetches recent papers from arXiv's API based on user-defined categories and processes the PDF/LaTeX content.
+
+2. **Processing** (`processor.py`): Calculates relevance scores based on keyword matching, with weights for title, abstract, and content matches, plus handling of exclusion keywords.
+
+3. **Analysis** (`analyzer.py`): Either extracts the abstract or generates a summary using an LLM (OpenAI or Gemini), with configurable options.
+
+4. **Notification** (`notifier.py`): Formats the filtered papers and sends them via email, with options for sorting by relevance, date, or title.
+
+### Resilience Features
+
+- **Retry Logic**: Uses the `tenacity` library to implement exponential backoff for API calls
+- **Error Handling**: Comprehensive error catching and logging throughout the codebase
+- **State Persistence**: Maintains processing state between runs using the `last_processed_date.txt` file
+
+### Performance Considerations
+
+- **Token Counting**: Uses `tiktoken` to accurately count tokens for LLM context management
+- **Configurable Limits**: Allows setting maximum papers per category to control processing time
+- **Incremental Processing**: Only fetches papers published since the last run
+
 ## Roadmap
 
 Key upcoming features:
 - Implement machine learning-based paper recommendations
 - Add support for additional academic paper sources
 - Expand notification methods
+- Enhance batch processing capabilities
 
-For a full list of proposed features and known issues, see the [open issues](https://github.com/seanbrar/paperweight/issues) page or the detailed [roadmap](docs/ROADMAP.md).
+For a full list of proposed features and planned enhancements, see the detailed [roadmap](docs/ROADMAP.md).
 
 ## Glossary
 
@@ -114,6 +158,8 @@ For a full list of proposed features and known issues, see the [open issues](htt
 - **YAML**: A human-readable data serialization format used for configuration files.
 - **SMTP**: Simple Mail Transfer Protocol; used for sending emails.
 - **LLM**: Large Language Model; an AI model used for text generation and analysis.
+- **Embedding**: A numerical representation of text that captures semantic meaning.
+- **Token**: A unit of text processed by language models, roughly corresponding to 4 characters.
 
 ## License
 
