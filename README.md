@@ -14,7 +14,7 @@ A scalable system for retrieving, filtering, and summarizing academic papers fro
 
 ```
 ┌───────────────┐     ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-│    SCRAPER    │────▶│   PROCESSOR   │────▶│   ANALYZER    │────▶│   NOTIFIER    │
+│    SCRAPER    │───▶│   PROCESSOR   │───▶│   ANALYZER    │───▶│   NOTIFIER    │
 └───────────────┘     └───────────────┘     └───────────────┘     └───────────────┘
         │                     │                     │                     │
         ▼                     ▼                     ▼                     ▼
