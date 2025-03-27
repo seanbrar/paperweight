@@ -1,6 +1,14 @@
 # paperweight
 
+[![GitHub License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
+
 A scalable system for retrieving, filtering, and summarizing academic papers from arXiv based on user preferences, with customizable notifications.
+
+## Background
+
+Staying current with research in rapidly evolving fields like machine learning, physics, or computational biology can be overwhelming. paperweight was developed to solve this challenge by automating the process of monitoring, filtering, and summarizing new publications. Unlike generic paper recommendation systems, paperweight puts researchers in control with fine-grained filtering and personalized relevance scoring, delivering only the most pertinent research directly to your inbox.
 
 ## Features
 
@@ -24,7 +32,23 @@ A scalable system for retrieving, filtering, and summarizing academic papers fro
 └───────────────┘     └───────────────┘     └───────────────┘     └───────────────┘
 ```
 
+## AI Technology Implementation
+
+paperweight leverages several AI technologies to enhance research discovery:
+
+1. **LLM-Based Summarization**: Integrates with OpenAI and Gemini models to generate concise, contextual summaries that capture key contributions, methodologies, and findings.
+
+2. **Semantic Relevance Scoring**: Goes beyond simple keyword matching by implementing a weighted scoring algorithm that considers term frequency, positional importance, and contextual relevance.
+
+3. **Adaptive Content Extraction**: Intelligently parses PDF structure to identify and extract the most meaningful content sections from diverse paper formats.
+
+4. **Context Management**: Optimizes token usage through selective content extraction and compression techniques to work within LLM context limits.
+
 ## Table of Contents
+- [Background](#background)
+- [Features](#features)
+- [System Architecture](#system-architecture)
+- [AI Technology Implementation](#ai-technology-implementation)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
