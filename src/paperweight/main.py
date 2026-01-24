@@ -13,11 +13,20 @@ import requests
 import yaml
 
 from paperweight.analyzer import get_abstracts
+from paperweight.db import DatabaseConnectionError, connect_db, is_db_enabled
 from paperweight.logging_config import setup_logging
 from paperweight.notifier import compile_and_send_notifications
 from paperweight.processor import process_papers
 from paperweight.scraper import get_recent_papers
-from paperweight.utils import load_config
+from paperweight.storage import (
+    create_run,
+    finish_run,
+    insert_artifacts,
+    insert_scores,
+    insert_summaries,
+    upsert_papers,
+)
+from paperweight.utils import get_package_version, hash_config, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +48,26 @@ def setup_and_get_papers(force_refresh):
 
     if force_refresh:
         logger.info("Force refresh requested. Ignoring last processed date.")
-        return get_recent_papers(force_refresh=True), config
+        return get_recent_papers(config, force_refresh=True), config
     else:
-        return get_recent_papers(), config
+        return get_recent_papers(config), config
+
+
+def get_summary_model(config):
+    """Extract the summary model identifier from configuration.
+
+    Args:
+        config: Configuration dictionary.
+
+    Returns:
+        Model identifier string or None if not configured.
+    """
+    analyzer_type = config.get("analyzer", {}).get("type")
+    if analyzer_type == "summary":
+        return config["analyzer"].get("llm_provider")
+    elif analyzer_type == "abstract":
+        return "abstract"
+    return None
 
 
 def process_and_summarize_papers(recent_papers, config):
@@ -74,14 +100,104 @@ def process_and_summarize_papers(recent_papers, config):
     return processed_papers
 
 
+def _initialize_db_run(config, recent_papers):
+    """Initialize a database run and persist paper metadata.
+
+    Args:
+        config: Configuration dictionary.
+        recent_papers: List of paper dictionaries.
+
+    Returns:
+        Tuple of (run_id, paper_id_map) where run_id is a UUID and
+        paper_id_map maps (arxiv_id, version) to database UUIDs.
+    """
+    config_hash = hash_config(config)
+    pipeline_version = get_package_version()
+    with connect_db(config["db"]) as conn:
+        run_id = create_run(conn, config_hash, pipeline_version)
+        paper_id_map = {}
+        if recent_papers:
+            paper_id_map = upsert_papers(conn, recent_papers)
+            # NOTE: Artifacts are already written to disk by get_recent_papers()
+            # (via scraper._store_artifacts). This call records their metadata in DB.
+            insert_artifacts(conn, recent_papers, paper_id_map)
+        conn.commit()
+    return run_id, paper_id_map
+
+
+def _persist_results(config, run_id, processed_papers, paper_id_map):
+    """Persist processing results (scores and summaries) to the database.
+
+    Args:
+        config: Configuration dictionary.
+        run_id: UUID of the current run.
+        processed_papers: List of processed paper dictionaries.
+        paper_id_map: Mapping of (arxiv_id, version) to database UUIDs.
+    """
+    summary_model = get_summary_model(config)
+    with connect_db(config["db"]) as conn:
+        insert_scores(conn, run_id, processed_papers, paper_id_map)
+        insert_summaries(conn, run_id, processed_papers, paper_id_map, summary_model)
+        conn.commit()
+
+
+def _finalize_run(config, run_id, status, notes):
+    """Mark a pipeline run as finished in the database.
+
+    Args:
+        config: Configuration dictionary.
+        run_id: UUID of the run to finalize.
+        status: Final status ('success' or 'failed').
+        notes: Optional notes (e.g., error message).
+    """
+    try:
+        with connect_db(config["db"], autocommit=True) as conn:
+            finish_run(conn, run_id, status, notes)
+    except Exception as e:
+        logger.error(f"Failed to finalize run status: {e}")
+
+
+def _get_error_message(error):
+    """Get a human-readable error message for known exception types.
+
+    Args:
+        error: The exception that occurred.
+
+    Returns:
+        Human-readable error description string.
+    """
+    if isinstance(error, requests.RequestException):
+        return "Network error occurred"
+    if isinstance(error, yaml.YAMLError):
+        return "Configuration error"
+    if isinstance(error, KeyError):
+        return "Missing configuration key"
+    if isinstance(error, ValueError):
+        return "Configuration validation error"
+    if isinstance(error, DatabaseConnectionError):
+        return "Database error"
+    return "An unexpected error occurred"
+
+
+def _handle_error(error, error_type):
+    """Log an error and return its string representation.
+
+    Args:
+        error: The exception that occurred.
+        error_type: Human-readable description of the error type.
+
+    Returns:
+        String representation of the error for storage.
+    """
+    logger.error(f"{error_type}: {error}")
+    return str(error)
+
+
 def main():
     """Main entry point for the paperweight application.
 
     This function parses command line arguments, coordinates the paper processing
     pipeline, and handles any errors that occur during execution.
-
-    Returns:
-        0 on successful execution, 1 on error.
     """
     parser = argparse.ArgumentParser(
         description="paperweight: Fetch and process arXiv papers"
@@ -93,9 +209,24 @@ def main():
     )
     args = parser.parse_args()
 
+    config = None
+    run_id = None
+    paper_id_map = {}
+    run_status = "failed"
+    run_notes = None
+    db_enabled = False
+
     try:
         recent_papers, config = setup_and_get_papers(args.force_refresh)
+        db_enabled = is_db_enabled(config)
+
+        if db_enabled:
+            run_id, paper_id_map = _initialize_db_run(config, recent_papers)
+
         processed_papers = process_and_summarize_papers(recent_papers, config)
+
+        if db_enabled and run_id and processed_papers:
+            _persist_results(config, run_id, processed_papers, paper_id_map)
 
         if processed_papers:
             notification_sent = compile_and_send_notifications(
@@ -105,16 +236,22 @@ def main():
                 logger.info("Notifications compiled and sent successfully")
             else:
                 logger.warning("Failed to send notifications")
-    except requests.RequestException as e:
-        logger.error(f"Network error occurred: {e}")
-    except yaml.YAMLError as e:
-        logger.error(f"Configuration error: {e}")
-    except KeyError as e:
-        logger.error(f"Missing configuration key: {e}")
-    except ValueError as e:
-        logger.error(f"Configuration validation error: {e}")
+
+        run_status = "success"
+    except (
+        requests.RequestException,
+        yaml.YAMLError,
+        KeyError,
+        ValueError,
+        DatabaseConnectionError,
+    ) as e:
+        error_type = _get_error_message(e)
+        run_notes = _handle_error(e, error_type)
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
+        run_notes = _handle_error(e, "An unexpected error occurred")
+    finally:
+        if db_enabled and run_id:
+            _finalize_run(config, run_id, run_status, run_notes)
 
 
 if __name__ == "__main__":

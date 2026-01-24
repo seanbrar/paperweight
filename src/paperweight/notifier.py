@@ -21,14 +21,16 @@ def send_email_notification(subject, body, config):
         body: The body text of the email.
         config: Configuration dictionary containing email settings.
 
-    Raises:
-        smtplib.SMTPException: If there is an error sending the email.
+    Returns:
+        bool: True if the email was sent successfully, False otherwise.
     """
     from_email = config["email"]["from"]
-    from_password = config["email"]["password"]
+    from_password = config["email"].get("password")
     to_email = config["email"]["to"]
     smtp_server = config["email"]["smtp_server"]
     smtp_port = config["email"]["smtp_port"]
+    use_tls = config["email"].get("use_tls", True)
+    use_auth = config["email"].get("use_auth", True)
 
     # Create the email
     msg = MIMEMultipart()
@@ -41,15 +43,20 @@ def send_email_notification(subject, body, config):
     # Send the email
     try:
         server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(from_email, from_password)
+        if use_tls:
+            server.starttls()
+        if use_auth and from_password:
+            server.login(from_email, from_password)
+        elif use_auth and not from_password:
+            logger.warning("SMTP auth enabled but no password provided; skipping login.")
         text = msg.as_string()
         server.sendmail(from_email, to_email, text)
         server.quit()
         logger.info("Email notification sent successfully")
+        return True
     except Exception as e:
         logger.error(f"Failed to send email notification: {e}", exc_info=True)
-        raise
+        return False
 
 
 def compile_and_send_notifications(papers, config):
@@ -64,7 +71,7 @@ def compile_and_send_notifications(papers, config):
     """
     if not papers:
         logger.info("No papers to send notifications for.")
-        return
+        return False
 
     sort_order = config.get("email", {}).get("sort_order", "relevance")
 

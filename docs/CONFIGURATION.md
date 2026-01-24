@@ -15,6 +15,8 @@ This document explains how to configure paperweight. The system uses a YAML conf
     - [Analyzer Settings](#analyzer-settings)
     - [Notifier Settings](#notifier-settings)
     - [Logging Settings](#logging-settings)
+    - [Database Settings](#database-settings)
+    - [Storage Settings](#storage-settings)
   - [Additional Notes](#additional-notes)
   - [Troubleshooting](#troubleshooting)
 
@@ -156,6 +158,8 @@ notifier:
     password: "YOUR_PASSWORD_HERE"
     smtp_server: "smtp.example.com"
     smtp_port: 587  # 465 | 587
+    use_tls: true
+    use_auth: true
     sort_order: alphabetical  # alphabetical | publication_time | relevance
 ```
 
@@ -167,6 +171,8 @@ Replace these values with your email settings:
   - Gmail: `smtp.gmail.com`, port 587
   - Yahoo: `smtp.mail.yahoo.com`, port 587
   - Outlook: `smtp-mail.outlook.com`, port 587
+- `use_tls`: Set to `false` for local SMTP tools that do not support STARTTLS.
+- `use_auth`: Set to `false` for local SMTP tools that do not require authentication.
 - `sort_order`: Determines how papers are sorted in the notification email.
 
 ### Logging Settings
@@ -185,6 +191,38 @@ logging:
 - `file`: Specifies the log file name. This uses a relative path from the project's root directory.
 
 For detailed debugging, set the level to DEBUG. For normal operation, INFO is recommended.
+
+### Database Settings
+
+```yaml
+db:
+  enabled: false
+  host: localhost
+  port: 5432
+  database: paperweight
+  user: paperweight
+  password: "CHANGE_ME"
+  sslmode: prefer
+```
+
+- `enabled`: Set to `true` to persist runs, papers, scores, and summaries to Postgres.
+- `host`, `port`, `database`, `user`, `password`: Standard Postgres connection settings.
+- `sslmode`: Postgres SSL mode (`disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`).
+
+If enabled, run the schema in `docs/db_schema.sql` before executing paperweight.
+You can also use `scripts/init_db.sh` with `DATABASE_URL` or standard `psql` env vars.
+
+### Storage Settings
+
+```yaml
+storage:
+  base_dir: data/artifacts
+```
+
+- `base_dir`: Filesystem location for paper artifacts (raw PDFs/sources and extracted text).
+
+When database storage is enabled, artifacts will be written to disk and recorded in
+`paper_artifacts`.
 
 ## Additional Notes
 

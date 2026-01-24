@@ -43,8 +43,22 @@ notifier:
     password: "YOUR_PASSWORD_HERE"
     smtp_server: "smtp.example.com"
     smtp_port: 587  # 465 | 587
+    use_tls: true
+    use_auth: true
     sort_order: alphabetical  # alphabetical | publication_time | relevance
 
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
   file: paperweight.log  # paperweight.log | /path/to/logfile.log
+
+db:
+  enabled: false
+  host: localhost
+  port: 5432
+  database: paperweight
+  user: paperweight
+  password: "CHANGE_ME"
+  sslmode: prefer  # disable | allow | prefer | require | verify-ca | verify-full
+
+storage:
+  base_dir: data/artifacts
