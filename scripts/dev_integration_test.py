@@ -11,6 +11,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.append(str(ROOT / "src"))
 sys.path.append(str(ROOT / "scripts"))
 
+import export_email
+
 from paperweight.analyzer import get_abstracts
 from paperweight.db import connect_db, is_db_enabled
 from paperweight.logging_config import setup_logging
@@ -26,7 +28,6 @@ from paperweight.storage import (
     upsert_papers,
 )
 from paperweight.utils import get_package_version, hash_config
-import export_email
 
 MAILPIT_API_URL = "http://localhost:8025/api/v1/messages"
 

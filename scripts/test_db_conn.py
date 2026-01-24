@@ -1,8 +1,9 @@
 """Simple script to test database connectivity."""
 
+from pathlib import Path
+
 import psycopg
 import yaml
-from pathlib import Path
 
 
 def test_db_connection():

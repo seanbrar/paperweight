@@ -1,7 +1,8 @@
+import logging
 import sys
 from pathlib import Path
+
 import yaml
-import logging
 
 # Add src to sys.path to import paperweight modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
@@ -17,7 +18,7 @@ def load_config():
     if not config_path.exists():
         logger.error(f"❌ Config file not found: {config_path}")
         sys.exit(1)
-    
+
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
@@ -28,7 +29,7 @@ def verify_db_connection(config):
 
     logger.info("🔍 Connecting to database...")
     db_config = config.get("db", {})
-    
+
     try:
         with connect_db(db_config) as conn:
             with conn.cursor() as cur:
@@ -36,7 +37,7 @@ def verify_db_connection(config):
                 result = cur.fetchone()
                 if result and result[0] == 1:
                     logger.info(f"✅ Successfully connected to database '{db_config.get('database')}' at '{db_config.get('host')}:{db_config.get('port')}'")
-                    
+
                     # Optional: Check if tables exist
                     cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
                     tables = cur.fetchall()
@@ -45,7 +46,7 @@ def verify_db_connection(config):
                         logger.info(f"   Found tables: {', '.join(table_names)}")
                     else:
                         logger.warning("   ⚠️  Connected, but no tables found in 'public' schema.")
-                    
+
                     return True
                 else:
                     logger.error("❌ Connected, but SELECT 1 failed.")

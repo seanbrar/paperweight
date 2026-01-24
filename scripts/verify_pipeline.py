@@ -1,15 +1,16 @@
-import sys
 import logging
-from pathlib import Path
-import yaml
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import yaml
 
 # Add src to sys.path
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from paperweight.scraper import get_recent_papers
-from paperweight.processor import process_papers
 from paperweight.analyzer import get_abstracts
+from paperweight.processor import process_papers
+from paperweight.scraper import get_recent_papers
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -20,35 +21,35 @@ def load_config():
     if not config_path.exists():
         logger.error(f"❌ Config file not found: {config_path}")
         sys.exit(1)
-    
+
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
 def verify_pipeline(config):
     logger.info("🧪 Verifying Pipeline (Scraper -> Processor -> Analyzer)...")
-    
+
     # Override config for fast testing
     logger.info("   ℹ️  Overriding config to fetch max 1 paper from cs.AI...")
     config["arxiv"]["max_results"] = 1
     config["arxiv"]["categories"] = ["cs.AI"]
-    
+
     # 1. Scraper
     logger.info("\n--- [1/3] Scraper Stage ---")
     try:
         # Use force_refresh=True to ensure we actually hit the API
         papers = get_recent_papers(config, force_refresh=True)
-        
+
         if not papers:
             logger.error("❌ Scraper returned 0 papers.")
             return False
-            
+
         logger.info(f"✅ Scraper fetched {len(papers)} paper(s).")
         logger.info(f"   Title: {papers[0]['title'][:50]}...")
         if 'content' not in papers[0] or not papers[0]['content']:
              logger.warning("   ⚠️  Paper content is empty! Processor might fail.")
         else:
              logger.info(f"   Content length: {len(papers[0]['content'])} chars")
-             
+
     except Exception as e:
         logger.error(f"❌ Scraper stage failed: {e}")
         return False
@@ -57,7 +58,7 @@ def verify_pipeline(config):
     logger.info("\n--- [2/3] Processor Stage ---")
     try:
         processed_papers = process_papers(papers, config["processor"])
-        
+
         if processed_papers:
              logger.info(f"✅ Processor passed. {len(processed_papers)} paper(s) met criteria.")
              logger.info(f"   Score: {processed_papers[0].get('relevance_score')}")
@@ -68,7 +69,7 @@ def verify_pipeline(config):
             # But let's verify analyzer with the raw paper if processed list is empty, just to check API
             if not processed_papers:
                  logger.info("   (Using raw paper for Analyzer check since Processor filtered it details)")
-                 processed_papers = papers 
+                 processed_papers = papers
 
     except Exception as e:
         logger.error(f"❌ Processor stage failed: {e}")
@@ -78,13 +79,13 @@ def verify_pipeline(config):
     logger.info("\n--- [3/3] Analyzer Stage ---")
     analyzer_config = config.get("analyzer", {})
     provider = analyzer_config.get("llm_provider")
-    
+
     if not provider:
         logger.warning("⚠️  No LLM provider configured. Skipping Analyzer.")
         return True
 
     logger.info(f"   Provider: {provider}")
-    
+
     # Check for API keys
     import os
     if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
@@ -98,9 +99,9 @@ def verify_pipeline(config):
         # Limit to 1 paper for cost/speed
         target_papers = processed_papers[:1]
         logger.info(f"   Sending {len(target_papers)} paper(s) to LLM...")
-        
+
         summaries = get_abstracts(target_papers, analyzer_config)
-        
+
         if summaries:
              logger.info("✅ Analyzer returned summaries.")
              if summaries[0]:
@@ -120,7 +121,7 @@ def verify_pipeline(config):
 if __name__ == "__main__":
     print("🚀 Starting Paperweight Pipeline Verification...")
     config = load_config()
-    
+
     if verify_pipeline(config):
         print("\n🎉 SUCCESS: Core pipeline verified.")
         sys.exit(0)

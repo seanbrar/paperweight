@@ -1,10 +1,11 @@
-import requests
-import html2text
 import json
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import html2text
+import requests
 
 # Configuration
 MAILPIT_API_URL = "http://localhost:8025/api/v1"
@@ -20,11 +21,11 @@ def get_latest_message():
         response = requests.get(f"{MAILPIT_API_URL}/messages")
         response.raise_for_status()
         data = response.json()
-        
+
         messages = data.get("messages", [])
         if not messages:
             return None
-        
+
         return messages[0]  # First one is the latest
     except requests.exceptions.ConnectionError:
         print("❌ Could not connect to Mailpit. Is it running?")
@@ -48,17 +49,17 @@ def format_as_markdown(message):
     h.ignore_links = False
     h.ignore_images = False
     h.body_width = 0  # No wrapping
-    
+
     headers = message.get("Headers", {})
     subject = headers.get("Subject", ["(No Subject)"])[0]
     from_addr = headers.get("From", ["(Unknown)"])[0]
     to_addr = headers.get("To", ["(Unknown)"])[0]
     date_str = headers.get("Date", [datetime.now().isoformat()])[0]
-    
+
     # Prefer HTML, fallback to Text
     html_body = message.get("HTML")
     text_body = message.get("Text")
-    
+
     if html_body:
         body_content = h.handle(html_body)
     elif text_body:
@@ -82,34 +83,34 @@ ID:      {message['ID']}
 
 def save_email(markdown_content, message_id):
     ensure_export_dir()
-    
+
     # Create a nice filename
     # e.g., email_20230101_120000_abc123.md
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"email_{timestamp}_{message_id}.md"
     filepath = EXPORT_DIR / filename
-    
+
     with open(filepath, "w") as f:
         f.write(markdown_content)
-    
+
     return filepath
 
 if __name__ == "__main__":
     print("🔍 Fetching latest email from Mailpit...")
-    
+
     latest_msg_summary = get_latest_message()
-    
+
     if not latest_msg_summary:
         print("📭 Mailpit is empty! No emails to export.")
         print("   Try running: python scripts/verify_email_setup.py")
         sys.exit(0)
-    
+
     msg_id = latest_msg_summary["ID"]
     print(f"📥 Found message: {latest_msg_summary.get('Subject')} (ID: {msg_id})")
-    
+
     full_message = get_message_content(msg_id)
     markdown_content = format_as_markdown(full_message)
     saved_path = save_email(markdown_content, msg_id)
-    
+
     print(f"✅ Saved to: {saved_path}")
     print(f"\nPro tip: View it with 'code {saved_path}'")

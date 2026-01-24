@@ -1,4 +1,5 @@
 -r requirements.txt
+arxiv==2.1.0
 html2text==2024.2.26
 mypy==1.11.2
 pre-commit==3.8.0
