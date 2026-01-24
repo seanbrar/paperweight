@@ -4,6 +4,9 @@
 *.log
 config.yaml
 last_processed_date.txt
+data/
+artifacts/
+.DS_Store
 
 # Build artifacts
 build/

@@ -8,6 +8,7 @@ setup(
     packages=find_packages(where="src"),
     install_requires=[
         "pypdf",
+        "psycopg[binary]",
         "python-dotenv",
         "PyYAML",
         "requests",
