@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from requests.exceptions import HTTPError
 
-from paperweight.scraper import extract_text_from_source, fetch_arxiv_papers
+from paperweight.db import DatabaseConnectionError
+from paperweight.scraper import extract_text_from_source, fetch_arxiv_papers, get_recent_papers
 
 
 @patch('paperweight.scraper.requests.get')
@@ -145,3 +146,19 @@ def test_fetch_arxiv_papers_max_results(mock_get):
 def test_extract_text_from_source_invalid_type():
     with pytest.raises(ValueError, match="Invalid source type: invalid_type"):
         extract_text_from_source(b'content', 'invalid_type')
+
+def test_get_recent_papers_db_unreachable():
+    config = {
+        'db': {
+            'enabled': True,
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'paperweight',
+            'user': 'paperweight',
+            'password': 'pass',
+            'sslmode': 'prefer'
+        }
+    }
+    with patch('paperweight.scraper.connect_db', side_effect=Exception("boom")):
+        with pytest.raises(DatabaseConnectionError, match="Database enabled but unreachable"):
+            get_recent_papers(config)

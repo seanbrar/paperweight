@@ -94,6 +94,58 @@ def test_invalid_logging_level():
     with pytest.raises(ValueError, match="Invalid logging level: 'INVALID_LEVEL'"):
         check_config(config)
 
+def test_email_no_auth_does_not_require_password():
+    config = {
+        'arxiv': {'categories': ['cs.AI']},
+        'processor': {},
+        'analyzer': {'type': 'abstract'},
+        'notifier': {'email': {'to': 'test@example.com', 'from': 'sender@example.com', 'smtp_server': 'smtp.example.com', 'smtp_port': 587, 'use_auth': False}},
+        'logging': {'level': 'INFO'}
+    }
+    assert check_config(config) is None
+
+def test_email_auth_requires_password():
+    config = {
+        'arxiv': {'categories': ['cs.AI']},
+        'processor': {},
+        'analyzer': {'type': 'abstract'},
+        'notifier': {'email': {'to': 'test@example.com', 'from': 'sender@example.com', 'smtp_server': 'smtp.example.com', 'smtp_port': 587}},
+        'logging': {'level': 'INFO'}
+    }
+    with pytest.raises(ValueError, match="Missing required email field: 'password'"):
+        check_config(config)
+
+def test_email_auth_requires_non_empty_password():
+    config = {
+        'arxiv': {'categories': ['cs.AI']},
+        'processor': {},
+        'analyzer': {'type': 'abstract'},
+        'notifier': {'email': {'to': 'test@example.com', 'from': 'sender@example.com', 'password': '', 'smtp_server': 'smtp.example.com', 'smtp_port': 587}},
+        'logging': {'level': 'INFO'}
+    }
+    with pytest.raises(ValueError, match="Missing required email field: 'password'"):
+        check_config(config)
+
+def test_db_enabled_requires_integer_port():
+    config = {
+        'arxiv': {'categories': ['cs.AI']},
+        'processor': {},
+        'analyzer': {'type': 'abstract'},
+        'notifier': {'email': {'to': 'test@example.com', 'from': 'sender@example.com', 'password': 'pass', 'smtp_server': 'smtp.example.com', 'smtp_port': 587}},
+        'logging': {'level': 'INFO'},
+        'db': {
+            'enabled': True,
+            'host': 'localhost',
+            'port': None,
+            'database': 'paperweight',
+            'user': 'paperweight',
+            'password': 'pass',
+            'sslmode': 'prefer'
+        }
+    }
+    with pytest.raises(ValueError, match="'port' in 'db' section must be a valid integer"):
+        check_config(config)
+
 def test_valid_config():
     config = {
         'arxiv': {'categories': ['cs.AI'], 'max_results': 100},
