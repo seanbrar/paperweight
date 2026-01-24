@@ -18,7 +18,7 @@ line-ending = "auto"
 mypy_path = "src"
 
 [tool.pytest.ini_options]
-addopts = "--strict-markers"
+addopts = "--strict-markers --cov=paperweight --cov-report=term-missing"
 markers = [
     "integration: marks tests as integration tests",
 ]

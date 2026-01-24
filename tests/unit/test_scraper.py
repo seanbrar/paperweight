@@ -6,7 +6,11 @@ import pytest
 from requests.exceptions import HTTPError
 
 from paperweight.db import DatabaseConnectionError
-from paperweight.scraper import extract_text_from_source, fetch_arxiv_papers, get_recent_papers
+from paperweight.scraper import (
+    extract_text_from_source,
+    fetch_arxiv_papers,
+    get_recent_papers,
+)
 
 
 @patch('paperweight.scraper.requests.get')
@@ -40,7 +44,6 @@ def test_fetch_arxiv_papers(mock_get):
     assert papers[1]['date'] == datetime(2024, 1, 14).date()
 
 def test_extract_text_from_source():
-    print("Executing test_extract_text_from_source")  # Add this line
     # Test PDF extraction
     current_dir = os.path.dirname(os.path.abspath(__file__))
     pdf_path = os.path.join(current_dir, 'test_data', 'test.pdf')

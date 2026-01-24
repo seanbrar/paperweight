@@ -4,15 +4,13 @@ import yaml
 from paperweight.utils import check_config, load_config
 
 
-def test_missing_config_file(tmp_path):
-    import os
-    os.chdir(tmp_path)
+def test_missing_config_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(FileNotFoundError):
         load_config()
 
-def test_invalid_yaml_syntax(tmp_path):
-    import os
-    os.chdir(tmp_path)
+def test_invalid_yaml_syntax(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     with open('config.yaml', 'w') as f:
         f.write("invalid: yaml: syntax:")
     with pytest.raises(yaml.YAMLError):
