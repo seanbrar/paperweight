@@ -7,6 +7,7 @@ requires-python = ">=3.11, <3.14"
 license = { text = "MIT" }
 authors = [{ name = "Sean Brar", email = "hello@seanbrar.com" }]
 dependencies = [
+    "arxiv==2.1.0",
     "pypdf==4.3.1",
     "psycopg[binary]==3.2.1",
     "python-dotenv==1.0.1",
@@ -22,7 +23,6 @@ paperweight = "paperweight.main:main"
 
 [project.optional-dependencies]
 dev = [
-    "arxiv==2.1.0",
     "html2text==2024.2.26",
     "mypy==1.11.2",
     "pre-commit==3.8.0",
@@ -59,6 +59,10 @@ line-ending = "auto"
 
 [tool.mypy]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "arxiv.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers --cov=paperweight --cov-report=term-missing"
