@@ -66,7 +66,8 @@ paperweight leverages several AI technologies to enhance research discovery:
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
+- [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - Required Python packages:
   - pypdf - For PDF document processing
   - python-dotenv - For environment variable management
@@ -79,13 +80,18 @@ paperweight leverages several AI technologies to enhance research discovery:
 ## Installation
 
 1. Clone the repository:
-   ```
+   ```bash
    git clone https://github.com/seanbrar/paperweight.git
    cd paperweight
    ```
 
 2. Install the package:
-   ```
+   ```bash
+   # Using uv (recommended)
+   uv sync --all-extras
+   source .venv/bin/activate
+   
+   # Or using pip
    pip install .
    ```
 
