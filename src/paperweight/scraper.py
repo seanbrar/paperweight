@@ -12,13 +12,12 @@ import logging
 import os
 import tarfile
 import time
-import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
+import arxiv
 import requests
 from pypdf import PdfReader
-from requests.exceptions import HTTPError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -37,11 +36,6 @@ from paperweight.utils import (
 logger = logging.getLogger(__name__)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
-)
 def fetch_arxiv_papers(
     category: str, start_date: date, max_results: Optional[int] = None
 ) -> List[Dict[str, Any]]:
@@ -60,76 +54,58 @@ def fetch_arxiv_papers(
         requests.Timeout: If the request times out.
     """
     logger.debug(f"Fetching arXiv papers for category '{category}' since {start_date}")
-    base_url = "http://export.arxiv.org/api/query?"
+
+    # Construct the query
     query = f"cat:{category}"
-    params: Dict[str, Union[str, int]] = {
-        "search_query": query,
-        "start": 0,
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
-    }
-    if max_results is not None and max_results > 0:
-        params["max_results"] = max_results
 
-    try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-    except HTTPError as http_err:
-        if response.status_code == 400 and "Invalid field: cat" in response.text:
-            logger.error(
-                f"Invalid arXiv category: {category}. Please check your configuration."
-            )
-            raise ValueError(
-                f"Invalid arXiv category: {category}. Please check your configuration."
-            ) from http_err
-        else:
-            logger.error(f"HTTP error occurred: {http_err}")
-            raise
+    # Configure the client
+    client = arxiv.Client(
+        page_size=100,
+        delay_seconds=3.0,
+        num_retries=3
+    )
 
-    root = ET.fromstring(response.content)
+    search = arxiv.Search(
+        query=query,
+        max_results=max_results,
+        sort_by=arxiv.SortCriterion.SubmittedDate,
+        sort_order=arxiv.SortOrder.Descending,
+    )
 
     papers = []
-    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
-        title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
-        link_elem = entry.find("{http://www.w3.org/2005/Atom}id")
-        published_elem = entry.find("{http://www.w3.org/2005/Atom}published")
-        summary_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
 
-        if (
-            title_elem is None
-            or link_elem is None
-            or published_elem is None
-            or summary_elem is None
-        ):
-            logger.warning("Skipping entry due to missing required elements")
-            continue
+    try:
+        # Iterate through the results
+        for result in client.results(search):
+            submitted_date = result.published.date()
 
-        title = title_elem.text.strip() if title_elem.text else ""
-        link = link_elem.text.strip() if link_elem.text else ""
-        submitted = published_elem.text.strip() if published_elem.text else ""
-        abstract = summary_elem.text.strip() if summary_elem.text else ""
+            logger.debug(f"Paper '{result.title}' submitted on {submitted_date}")
 
-        try:
-            submitted_date = datetime.strptime(submitted, "%Y-%m-%dT%H:%M:%SZ").date()
-        except ValueError:
-            logger.warning(f"Invalid date format for paper: {title}")
-            continue
+            if submitted_date < start_date:
+                logger.debug(
+                    f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+                )
+                break
 
-        logger.debug(f"Paper '{title}' submitted on {submitted_date}")
-
-        if submitted_date < start_date:
-            logger.debug(
-                f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+            papers.append(
+                {
+                    "title": result.title,
+                    "link": result.entry_id,
+                    "date": submitted_date,
+                    "abstract": result.summary,
+                }
             )
-            break
 
-        papers.append(
-            {"title": title, "link": link, "date": submitted_date, "abstract": abstract}
-        )
+            # Safety break if max_results is set multiple times or if the generator doesn't stop
+            if max_results is not None and max_results > 0 and len(papers) >= max_results:
+                break
 
-        if max_results is not None and max_results > 0 and len(papers) >= max_results:
-            logger.debug(f"Reached max_results limit of {max_results}")
-            break
+    except Exception as e:
+         # Map arxiv errors or other unexpected errors
+         logger.error(f"Error fetching papers: {e}")
+         # We might want to re-raise or handle gracefully depending on the exact error
+         # For now, consistent with previous behavior, let's allow tenacity or caller to handle
+         raise
 
     logger.info(
         f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}"
