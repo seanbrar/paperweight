@@ -1,3 +1,15 @@
+"""Integration tests for the paperweight pipeline.
+
+This file tests the complete data flow through the system:
+- Fetching papers from arXiv
+- Processing and scoring papers
+- Generating summaries
+- Sending notifications
+- Database storage (when enabled)
+
+Also includes error handling tests for the main entry point.
+"""
+
 import os
 import time
 from datetime import date
@@ -5,11 +17,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 import yaml
 
 from paperweight.analyzer import get_abstracts
-from paperweight.db import connect_db, is_db_enabled
+from paperweight.db import DatabaseConnectionError, connect_db, is_db_enabled
 from paperweight.logging_config import setup_logging
+from paperweight.main import main
 from paperweight.notifier import compile_and_send_notifications
 from paperweight.processor import process_papers
 from paperweight.scraper import get_recent_papers
@@ -23,12 +37,17 @@ from paperweight.storage import (
 )
 from paperweight.utils import get_package_version, hash_config
 
-ROOT = Path(__file__).parent.parent.parent
+
+ROOT = Path(__file__).parent.parent
 LIVE_INTEGRATION_ENV = "PAPERWEIGHT_LIVE_INTEGRATION"
 MAILPIT_HOST_ENV = "PAPERWEIGHT_MAILPIT_HOST"
 MAILPIT_PORT_ENV = "PAPERWEIGHT_MAILPIT_PORT"
 MAILPIT_HTTP_PORT_ENV = "PAPERWEIGHT_MAILPIT_HTTP_PORT"
 
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def integration_config(tmp_path):
@@ -59,21 +78,71 @@ def integration_config(tmp_path):
     return config
 
 
+@pytest.fixture
+def mock_main_dependencies(mocker):
+    """Mock all external dependencies for main() tests."""
+    # Mock sys.argv to prevent argparse from picking up pytest arguments
+    mocker.patch('sys.argv', ['paperweight'])
+
+    # Mock configuration and logging
+    mock_load_config = mocker.patch('paperweight.main.load_config')
+    mock_load_config.return_value = {
+        "logging": {"level": "INFO"},
+        "processor": {},
+        "analyzer": {"type": "abstract"},
+        "notifier": {"email": {}},
+        "db": {"enabled": False},
+    }
+    mock_setup_logging = mocker.patch('paperweight.main.setup_logging')
+
+    # Mock paper fetching and processing
+    mock_get_recent_papers = mocker.patch('paperweight.main.get_recent_papers')
+    mock_get_recent_papers.return_value = [{"id": "1234.5678", "title": "Test Paper"}]
+
+    mock_process_papers = mocker.patch('paperweight.main.process_papers')
+    mock_process_papers.return_value = [
+        {"id": "1234.5678", "title": "Test Paper", "relevance_score": 0.8}
+    ]
+
+    mock_get_abstracts = mocker.patch('paperweight.main.get_abstracts')
+    mock_get_abstracts.return_value = ["Test summary"]
+
+    # Mock notifications
+    mock_notifications = mocker.patch(
+        'paperweight.main.compile_and_send_notifications'
+    )
+    mock_notifications.return_value = True
+
+    # Mock database functions
+    mock_is_db_enabled = mocker.patch('paperweight.main.is_db_enabled')
+    mock_is_db_enabled.return_value = False
+
+    # Mock logger
+    mock_logger = mocker.patch('paperweight.main.logger')
+
+    return {
+        'load_config': mock_load_config,
+        'setup_logging': mock_setup_logging,
+        'get_recent_papers': mock_get_recent_papers,
+        'process_papers': mock_process_papers,
+        'get_abstracts': mock_get_abstracts,
+        'notifications': mock_notifications,
+        'logger': mock_logger,
+        'is_db_enabled': mock_is_db_enabled,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Full Pipeline Tests
+# ---------------------------------------------------------------------------
+
 @pytest.mark.integration
 @pytest.mark.skipif(
     not os.getenv(LIVE_INTEGRATION_ENV),
     reason=f"Set {LIVE_INTEGRATION_ENV}=1 to run live integration test."
 )
-def test_pipeline_end_to_end(integration_config): # noqa: C901
-    """
-    Run the full pipeline:
-    1. Fetch papers
-    2. Process papers
-    3. Summarize papers
-    4. Store in DB (if enabled)
-    5. Send notification
-    6. Verify email receipt (via Mailpit)
-    """
+def test_pipeline_end_to_end(integration_config):  # noqa: C901
+    """Full pipeline: fetch, process, summarize, store, notify."""
     setup_logging(integration_config["logging"])
 
     # Mailpit config
@@ -82,7 +151,6 @@ def test_pipeline_end_to_end(integration_config): # noqa: C901
     mailpit_url = f"http://{mailpit_host}:{mailpit_http_port}/api/v1/messages"
 
     # Check Mailpit before run
-    import requests
     try:
         resp = requests.get(mailpit_url, timeout=2)
         resp.raise_for_status()
@@ -135,7 +203,6 @@ def test_pipeline_end_to_end(integration_config): # noqa: C901
         assert notification_sent, "Notification send failed"
 
         # 5. Verify Email
-        # Wait for email to arrive
         timeout = 10
         start_time = time.time()
         email_received = False
@@ -158,7 +225,7 @@ def test_pipeline_end_to_end(integration_config): # noqa: C901
 
     except Exception as e:
         run_notes = str(e)
-        raise e
+        raise
     finally:
         if db_enabled and run_id:
             with connect_db(integration_config["db"]) as conn:
@@ -168,6 +235,7 @@ def test_pipeline_end_to_end(integration_config): # noqa: C901
 
 @pytest.mark.integration
 def test_pipeline_end_to_end_stubbed(monkeypatch, tmp_path):
+    """Full pipeline with stubbed external calls."""
     config = {
         "arxiv": {"categories": ["cs.AI"], "max_results": 2},
         "processor": {
@@ -246,3 +314,53 @@ def test_pipeline_end_to_end_stubbed(monkeypatch, tmp_path):
     notification_sent = compile_and_send_notifications(processed, config["notifier"])
     assert notification_sent is True
     send_email.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Error Handling Tests (absorbed from test_main.py)
+# ---------------------------------------------------------------------------
+
+class TestMainErrorHandling:
+    """Tests for error handling in the main entry point."""
+
+    def test_config_yaml_error(self, mock_main_dependencies):
+        """YAML parsing errors are logged."""
+        mock_main_dependencies['load_config'].side_effect = yaml.YAMLError("Invalid YAML")
+
+        main()
+        mock_main_dependencies['logger'].error.assert_called_with(
+            "Configuration error: Invalid YAML"
+        )
+
+    def test_network_error(self, mock_main_dependencies):
+        """Network errors are logged."""
+        mock_main_dependencies['load_config'].side_effect = requests.RequestException(
+            "Connection failed"
+        )
+
+        main()
+        mock_main_dependencies['logger'].error.assert_called_with(
+            "Network error occurred: Connection failed"
+        )
+
+    def test_database_unreachable(self, mock_main_dependencies, mocker):
+        """Database connection errors are logged."""
+        mocker.patch(
+            'paperweight.main.setup_and_get_papers',
+            side_effect=DatabaseConnectionError("Database enabled but unreachable."),
+        )
+
+        main()
+        mock_main_dependencies['logger'].error.assert_called_with(
+            "Database error: Database enabled but unreachable."
+        )
+
+    def test_no_papers_found(self, mock_main_dependencies):
+        """When no papers are found, notification is not called."""
+        mock_main_dependencies['get_recent_papers'].return_value = []
+
+        main()
+        mock_main_dependencies['notifications'].assert_not_called()
+        mock_main_dependencies['logger'].info.assert_any_call(
+            "No new papers to process. Exiting."
+        )

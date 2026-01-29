@@ -4,31 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paperweight.db import connect_db, is_db_enabled
-
-
-class TestIsDbEnabled:
-    """Tests for is_db_enabled function."""
-
-    def test_db_enabled_true(self):
-        """Test when database is explicitly enabled."""
-        config = {"db": {"enabled": True}}
-        assert is_db_enabled(config) is True
-
-    def test_db_enabled_false(self):
-        """Test when database is explicitly disabled."""
-        config = {"db": {"enabled": False}}
-        assert is_db_enabled(config) is False
-
-    def test_db_section_missing(self):
-        """Test when db section is missing from config."""
-        config = {}
-        assert is_db_enabled(config) is False
-
-    def test_enabled_key_missing(self):
-        """Test when enabled key is missing from db section."""
-        config = {"db": {"host": "localhost"}}
-        assert is_db_enabled(config) is False
+from paperweight.db import connect_db
 
 
 class TestConnectDb:

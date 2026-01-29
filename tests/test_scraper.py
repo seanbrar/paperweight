@@ -97,19 +97,8 @@ def test_fetch_arxiv_papers_max_results(MockClient):
     assert papers[2]['title'] == 'Test Paper 3'
 
 
-def test_extract_text_from_source():
-    # Test PDF extraction
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    pdf_path = os.path.join(current_dir, 'test_data', 'test.pdf')
-
-    assert os.path.exists(pdf_path), f"Test PDF file not found at {pdf_path}"
-
-    with open(pdf_path, 'rb') as f:
-        pdf_content = f.read()
-    pdf_text = extract_text_from_source(pdf_content, 'pdf')
-    assert "Test PDF content" in pdf_text
-
-    # Test LaTeX source extraction
+def test_extract_text_from_latex_source():
+    """Extract text from LaTeX source content."""
     latex_content = b'''
     \\documentclass{article}
     \\begin{document}

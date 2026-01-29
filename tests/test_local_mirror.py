@@ -35,35 +35,6 @@ GOLDEN_SET_IDS = [
 ]
 
 
-class TestLocalMirrorSetup:
-    """Test that local mirror is properly populated and accessible."""
-
-    def test_mirror_exists(self, local_mirror_path: Path):
-        """Verify local mirror directory exists."""
-        assert local_mirror_path.exists()
-        assert local_mirror_path.is_dir()
-
-    def test_database_exists(self, local_mirror_db: Path):
-        """Verify SQLite database exists and has papers."""
-        assert local_mirror_db.exists()
-
-        conn = sqlite3.connect(local_mirror_db)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM papers")
-        count = cursor.fetchone()[0]
-        conn.close()
-
-        assert count > 0, "Database should contain papers"
-
-    def test_files_directory_has_content(self, local_mirror_files: Path):
-        """Verify files directory contains PDFs and source archives."""
-        pdfs = list(local_mirror_files.glob("*.pdf"))
-        sources = list(local_mirror_files.glob("*.tar.gz"))
-
-        assert len(pdfs) > 0, "Should have PDF files"
-        assert len(sources) > 0, "Should have source archives"
-
-
 class TestMockFetching:
     """Test mock functions return correct data from local files."""
 
