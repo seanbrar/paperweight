@@ -1,10 +1,11 @@
 # paperweight
 
+[![PyPI](https://img.shields.io/pypi/v/academic-paperweight)](https://pypi.org/project/academic-paperweight/)
 [![GitHub License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 
-A scalable system for retrieving, filtering, and summarizing academic papers from arXiv based on user preferences, with customizable notifications.
+Automated retrieval, filtering, and LLM-powered summarization of arXiv papers based on your research interests.
 
 ## Background
 
@@ -68,16 +69,16 @@ paperweight leverages several AI technologies to enhance research discovery:
 
 - Python 3.11 or higher
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
-- Required Python packages:
-  - pypdf - For PDF document processing
-  - python-dotenv - For environment variable management
-  - PyYAML - For configuration parsing
-  - requests - For API communication
-  - simplerllm - For LLM integration
-  - tenacity - For resilient API interactions
-  - tiktoken - For token counting
 
 ## Installation
+
+### From PyPI
+
+```bash
+pip install academic-paperweight
+```
+
+### From Source
 
 1. Clone the repository:
    ```bash

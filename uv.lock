@@ -8,6 +8,58 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "academic-paperweight"
+version = "0.1.2"
+source = { editable = "." }
+dependencies = [
+    { name = "arxiv" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pypdf" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "simplerllm" },
+    { name = "tenacity" },
+    { name = "tiktoken" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "html2text" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "types-requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arxiv", specifier = ">=2.1.0" },
+    { name = "html2text", marker = "extra == 'dev'", specifier = ">=2024.2.26" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.2" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2.1" },
+    { name = "pypdf", specifier = ">=4.3.1" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.10.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
+    { name = "simplerllm", specifier = ">=0.3.3.5" },
+    { name = "tenacity", specifier = ">=9.0.0" },
+    { name = "tiktoken", specifier = ">=0.9.0" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20240808" },
+    { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.32.0.20240907" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1362,58 +1414,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/65/ee/299d360cdc32edc7d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl", hash = "sha256:b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529", size = 74366, upload-time = "2026-01-21T20:50:37.788Z" },
 ]
-
-[[package]]
-name = "paperweight"
-version = "0.1.2"
-source = { editable = "." }
-dependencies = [
-    { name = "arxiv" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pypdf" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "simplerllm" },
-    { name = "tenacity" },
-    { name = "tiktoken" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "html2text" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-    { name = "types-requests" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arxiv", specifier = "==2.1.0" },
-    { name = "html2text", marker = "extra == 'dev'", specifier = "==2024.2.26" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.11.2" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = "==3.8.0" },
-    { name = "psycopg", extras = ["binary"], specifier = "==3.2.1" },
-    { name = "pypdf", specifier = "==4.3.1" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.2" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = "==5.0.0" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = "==3.10.0" },
-    { name = "python-dotenv", specifier = "==1.0.1" },
-    { name = "pyyaml", specifier = "==6.0.2" },
-    { name = "requests", specifier = "==2.31.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.6.4" },
-    { name = "simplerllm", specifier = "==0.3.3.5" },
-    { name = "tenacity", specifier = "==9.0.0" },
-    { name = "tiktoken", specifier = "==0.9.0" },
-    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = "==6.0.12.20240808" },
-    { name = "types-requests", marker = "extra == 'dev'", specifier = "==2.32.0.20240907" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "pillow"
