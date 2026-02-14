@@ -28,8 +28,8 @@ The default experience must be:
 
 - [x] Default delivery is deterministic `stdout` digest.
 - [x] Add Atom feed output as a secondary delivery format.
-- [ ] Add `paperweight init` for minimal config bootstrap.
-- [ ] Add `paperweight doctor` for config/env/provider checks.
+- [x] Add `paperweight init` for minimal config bootstrap.
+- [x] Add `paperweight doctor` for config/env/provider checks.
 
 ### AI and ranking
 

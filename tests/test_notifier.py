@@ -55,6 +55,7 @@ def test_render_text_digest_deterministic():
             "summary": "Summary B",
             "link": "http://arxiv.org/abs/2",
             "relevance_score": 2.0,
+            "triage_rationale": "Matched transformer + planning",
         },
         {
             "title": "A Paper",
@@ -62,11 +63,13 @@ def test_render_text_digest_deterministic():
             "summary": "Summary A",
             "link": "http://arxiv.org/abs/1",
             "relevance_score": 1.0,
+            "triage_rationale": "Matched profile keywords",
         },
     ]
     digest = render_text_digest(papers, sort_order="alphabetical")
     assert "1. A Paper" in digest
     assert "2. B Paper" in digest
+    assert "Why: Matched profile keywords" in digest
 
 
 def test_render_atom_feed_contains_required_elements():

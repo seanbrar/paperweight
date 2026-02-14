@@ -7,7 +7,10 @@ configuration loading, logging setup, and the main execution flow of the applica
 
 import argparse
 import logging
+import os
+import sys
 import traceback
+from pathlib import Path
 
 import requests
 import yaml
@@ -35,8 +38,45 @@ from paperweight.utils import get_package_version, hash_config, load_config
 
 logger = logging.getLogger(__name__)
 
+MINIMAL_CONFIG_TEMPLATE = """arxiv:
+  categories:
+    - cs.AI
+    - cs.CL
+  max_results: 50
 
-def setup_and_get_papers(force_refresh, include_content=True):
+triage:
+  enabled: true
+  llm_provider: openai
+  min_score: 60
+  max_selected: 25
+
+processor:
+  keywords:
+    - transformer
+    - reasoning
+    - language model
+  exclusion_keywords: []
+  important_words: []
+  title_keyword_weight: 3
+  abstract_keyword_weight: 2
+  content_keyword_weight: 1
+  exclusion_keyword_penalty: 5
+  important_words_weight: 0.5
+  min_score: 10
+
+analyzer:
+  type: summary
+  llm_provider: openai
+  max_input_tokens: 7000
+  max_input_chars: 20000
+
+logging:
+  level: INFO
+  file: paperweight.log
+"""
+
+
+def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml"):
     """Set up the application and fetch papers.
 
     Args:
@@ -47,7 +87,7 @@ def setup_and_get_papers(force_refresh, include_content=True):
         Tuple of (papers, config) where papers is a list of paper dictionaries and
         config is the loaded configuration dictionary.
     """
-    config = load_config()
+    config = load_config(config_path=config_path)
     setup_logging(config["logging"])
     logger.info("Configuration loaded successfully")
 
@@ -243,14 +283,11 @@ def _apply_triage_and_hydrate(recent_papers, config):
     return hydrate_papers_with_content(triaged_papers, config)
 
 
-def main():
-    """Main entry point for the paperweight application.
-
-    This function parses command line arguments, coordinates the paper processing
-    pipeline, and handles any errors that occur during execution.
-    """
-    parser = argparse.ArgumentParser(
-        description="paperweight: Fetch and process arXiv papers"
+def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="Path to config file (default: config.yaml)",
     )
     parser.add_argument(
         "--force-refresh",
@@ -274,18 +311,144 @@ def main():
         default="relevance",
         help="Sort order for digest output",
     )
-    args = parser.parse_args()
 
+
+def _build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="paperweight: Fetch, triage, and summarize arXiv papers"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Run the paperweight pipeline")
+    _add_run_arguments(run_parser)
+
+    init_parser = subparsers.add_parser("init", help="Create a minimal config file")
+    init_parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="Path to write config file (default: config.yaml)",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing config file if present",
+    )
+
+    doctor_parser = subparsers.add_parser("doctor", help="Validate local configuration")
+    doctor_parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="Path to config file (default: config.yaml)",
+    )
+
+    return parser
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    args_list = list(argv if argv is not None else sys.argv[1:])
+    parser = _build_cli_parser()
+
+    # Backward-compatible default: `paperweight [run-args]` == `paperweight run [run-args]`
+    known_commands = {"run", "init", "doctor"}
+    if args_list and args_list[0] in known_commands:
+        return parser.parse_args(args_list)
+
+    run_parser = argparse.ArgumentParser(
+        description="paperweight: Fetch, triage, and summarize arXiv papers"
+    )
+    _add_run_arguments(run_parser)
+    run_args = run_parser.parse_args(args_list)
+    run_args.command = "run"
+    return run_args
+
+
+def _write_minimal_config(path: str, force: bool = False) -> None:
+    target = Path(path)
+    if target.exists() and not force:
+        raise ValueError(f"Config file already exists: {target}. Use --force to overwrite.")
+
+    base_template = Path("config-base.yaml")
+    content = (
+        base_template.read_text(encoding="utf-8")
+        if base_template.exists()
+        else MINIMAL_CONFIG_TEMPLATE
+    )
+    target.write_text(content, encoding="utf-8")
+    print(f"Wrote config: {target}")
+
+
+def _doctor(config_path: str) -> int:
+    results: list[tuple[str, str, str]] = []
+
+    config_file = Path(config_path)
+    if config_file.exists():
+        results.append(("OK", "config file", str(config_file)))
+    else:
+        results.append(("FAIL", "config file", f"Missing: {config_file}"))
+        _print_doctor(results)
+        return 1
+
+    try:
+        config = load_config(config_path=config_path)
+        results.append(("OK", "config parse", "Loaded and validated"))
+    except Exception as e:
+        results.append(("FAIL", "config parse", str(e)))
+        _print_doctor(results)
+        return 1
+
+    triage_cfg = config.get("triage", {})
+    triage_enabled = triage_cfg.get("enabled", True)
+    triage_provider = (
+        triage_cfg.get("llm_provider")
+        or config.get("analyzer", {}).get("llm_provider")
+        or "openai"
+    )
+    triage_key = (
+        triage_cfg.get("api_key")
+        or config.get("analyzer", {}).get("api_key")
+        or os.getenv(f"{str(triage_provider).upper()}_API_KEY")
+    )
+
+    if triage_enabled and triage_key:
+        results.append(("OK", "triage auth", f"{triage_provider} key available"))
+    elif triage_enabled:
+        results.append(
+            ("WARN", "triage auth", "No API key found; heuristic fallback will be used")
+        )
+    else:
+        results.append(("OK", "triage", "Disabled"))
+
+    delivery_modes = ["stdout", "atom"]
+    notifier = config.get("notifier", {})
+    if notifier:
+        delivery_modes.append("email")
+    results.append(("OK", "delivery modes", ", ".join(delivery_modes)))
+
+    _print_doctor(results)
+    return 0
+
+
+def _print_doctor(results: list[tuple[str, str, str]]) -> None:
+    print("paperweight doctor")
+    print("")
+    for status, check, detail in results:
+        print(f"[{status}] {check}: {detail}")
+
+
+def _run_pipeline(args: argparse.Namespace) -> int:
     config = None
     run_id = None
     paper_id_map = {}
     run_status = "failed"
     run_notes = None
     db_enabled = False
+    had_error = False
 
     try:
         recent_papers, config = setup_and_get_papers(
-            args.force_refresh, include_content=False
+            args.force_refresh,
+            include_content=False,
+            config_path=args.config,
         )
         shortlisted_papers = _apply_triage_and_hydrate(recent_papers, config)
         db_enabled = is_db_enabled(config)
@@ -309,18 +472,32 @@ def main():
         ValueError,
         DatabaseConnectionError,
     ) as e:
+        had_error = True
         error_type = _get_error_message(e)
         run_notes = _handle_error(e, error_type)
     except Exception as e:
+        had_error = True
         run_notes = _handle_error(e, "An unexpected error occurred")
     finally:
         if db_enabled and run_id:
             _finalize_run(config, run_id, run_status, run_notes)
+    return 1 if had_error else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point."""
+    args = _parse_args(argv)
+    if args.command == "init":
+        _write_minimal_config(args.config, force=args.force)
+        return 0
+    if args.command == "doctor":
+        return _doctor(args.config)
+    return _run_pipeline(args)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except Exception as e:
         print(f"Uncaught exception in main: {e}")
         traceback.print_exc()

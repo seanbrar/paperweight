@@ -60,7 +60,10 @@ This prints the digest to `stdout` by default.
 ## CLI
 
 ```bash
-paperweight [--force-refresh] [--delivery stdout|atom|email] [--output PATH] [--sort-order relevance|alphabetical|publication_time]
+paperweight [run-options]
+paperweight run [run-options]
+paperweight init [--config PATH] [--force]
+paperweight doctor [--config PATH]
 ```
 
 Examples:
@@ -74,6 +77,12 @@ paperweight --delivery atom --output ./paperweight.xml
 
 # optional email delivery (requires notifier.email config)
 paperweight --delivery email
+
+# bootstrap a config file
+paperweight init
+
+# validate local setup
+paperweight doctor
 ```
 
 ## Configuration

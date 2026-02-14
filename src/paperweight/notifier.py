@@ -45,10 +45,12 @@ def render_text_digest(
     lines = [heading, ""]
 
     for idx, paper in enumerate(ordered, start=1):
-        score = paper.get("relevance_score", 0.0)
+        score = paper.get("relevance_score", paper.get("triage_score", 0.0))
         lines.append(f"{idx}. {paper.get('title', 'Untitled')}")
         lines.append(f"   Date: {_format_paper_date(paper)}")
         lines.append(f"   Score: {score:.2f}")
+        if paper.get("triage_rationale"):
+            lines.append(f"   Why: {paper.get('triage_rationale')}")
         lines.append(f"   Link: {paper.get('link', '')}")
         lines.append(f"   Summary: {(paper.get('summary') or '').strip()}")
         lines.append("")
@@ -83,6 +85,7 @@ def render_atom_feed(
         title = paper.get("title", "Untitled")
         summary = (paper.get("summary") or "").strip()
         score = paper.get("relevance_score", 0.0)
+        rationale = (paper.get("triage_rationale") or "").strip()
         date_text = _format_paper_date(paper)
         updated = f"{date_text}T00:00:00Z" if len(date_text) == 10 else date_text
 
@@ -93,7 +96,7 @@ def render_atom_feed(
             ET.SubElement(entry, f"{{{ns}}}link", {"href": link, "rel": "alternate"})
         ET.SubElement(entry, f"{{{ns}}}summary").text = summary
         ET.SubElement(entry, f"{{{ns}}}content", {"type": "text"}).text = (
-            f"Score: {score:.2f}\nLink: {link}\nSummary: {summary}"
+            f"Score: {score:.2f}\nWhy: {rationale}\nLink: {link}\nSummary: {summary}"
         )
 
     xml_bytes = ET.tostring(feed, encoding="utf-8", xml_declaration=True)
