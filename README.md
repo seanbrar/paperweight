@@ -63,7 +63,7 @@ This prints the digest to `stdout` by default.
 paperweight [run-options]
 paperweight run [run-options]
 paperweight init [--config PATH] [--force]
-paperweight doctor [--config PATH]
+paperweight doctor [--config PATH] [--strict]
 ```
 
 Examples:
@@ -74,6 +74,9 @@ paperweight
 
 # write Atom feed
 paperweight --delivery atom --output ./paperweight.xml
+
+# write JSON for scripts
+paperweight --delivery json --output ./paperweight.json
 
 # optional email delivery (requires notifier.email config)
 paperweight --delivery email

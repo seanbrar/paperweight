@@ -63,6 +63,38 @@ def _stub_scraper(monkeypatch):
     monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
 
 
+def _stub_scraper_two_papers(monkeypatch):
+    fake_papers = [
+        {
+            "title": "Transformer Agents",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "date": date(2024, 1, 15),
+            "abstract": "A paper about transformer-based agents.",
+        },
+        {
+            "title": "Reasoning Models",
+            "link": "http://arxiv.org/abs/2401.67890",
+            "date": date(2024, 1, 14),
+            "abstract": "A paper about reasoning models.",
+        },
+    ]
+    monkeypatch.setattr(
+        "paperweight.scraper.fetch_recent_papers", lambda _config, _days: fake_papers
+    )
+    monkeypatch.setattr(
+        "paperweight.scraper.fetch_paper_contents",
+        lambda _ids: [
+            ("2401.12345", b"stub-bytes", "pdf"),
+            ("2401.67890", b"stub-bytes", "pdf"),
+        ],
+    )
+    monkeypatch.setattr(
+        "paperweight.scraper.extract_text_from_source", lambda _c, _m: "transformer agent"
+    )
+    monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
+    monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
+
+
 def test_run_stdout_mode_smoke(tmp_path, monkeypatch, capsys):
     config_path = _write_config(tmp_path, triage_enabled=False)
     _stub_scraper(monkeypatch)
@@ -111,3 +143,27 @@ def test_doctor_warns_without_api_key(tmp_path, capsys, monkeypatch):
 
     assert exit_code == 0
     assert "[WARN] triage auth" in out
+
+
+def test_run_json_respects_max_items(tmp_path, monkeypatch):
+    config_path = _write_config(tmp_path, triage_enabled=False)
+    json_path = tmp_path / "digest.json"
+    _stub_scraper_two_papers(monkeypatch)
+
+    exit_code = main(
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--force-refresh",
+            "--delivery",
+            "json",
+            "--output",
+            str(json_path),
+            "--max-items",
+            "1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json_path.read_text(encoding="utf-8")
+    assert payload.count('"title"') == 1

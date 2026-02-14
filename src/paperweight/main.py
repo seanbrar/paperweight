@@ -21,6 +21,7 @@ from paperweight.logging_config import setup_logging
 from paperweight.notifier import (
     compile_and_send_notifications,
     render_atom_feed,
+    render_json_digest,
     render_text_digest,
     write_output,
 )
@@ -245,9 +246,17 @@ def _handle_error(error, error_type):
 
 def _deliver_output(processed_papers, config, args):
     """Deliver processed papers via the requested adapter."""
+    if args.max_items and args.max_items > 0:
+        processed_papers = processed_papers[: args.max_items]
+
     if args.delivery == "stdout":
         digest = render_text_digest(processed_papers, sort_order=args.sort_order)
         write_output(digest, args.output)
+        return
+
+    if args.delivery == "json":
+        json_payload = render_json_digest(processed_papers, sort_order=args.sort_order)
+        write_output(json_payload + "\n", args.output)
         return
 
     if args.delivery == "atom":
@@ -296,7 +305,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--delivery",
-        choices=["stdout", "atom", "email"],
+        choices=["stdout", "json", "atom", "email"],
         default="stdout",
         help="Delivery target for results (default: stdout)",
     )
@@ -310,6 +319,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["relevance", "alphabetical", "publication_time"],
         default="relevance",
         help="Sort order for digest output",
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=0,
+        help="Optional cap on number of delivered papers (0 = no cap)",
     )
 
 
@@ -339,6 +354,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--config",
         default="config.yaml",
         help="Path to config file (default: config.yaml)",
+    )
+    doctor_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return non-zero if any warnings are present",
     )
 
     return parser
@@ -379,7 +399,7 @@ def _write_minimal_config(path: str, force: bool = False) -> None:
     print(f"Wrote config: {target}")
 
 
-def _doctor(config_path: str) -> int:
+def _doctor(config_path: str, strict: bool = False) -> int:
     results: list[tuple[str, str, str]] = []
 
     config_file = Path(config_path)
@@ -427,7 +447,8 @@ def _doctor(config_path: str) -> int:
     results.append(("OK", "delivery modes", ", ".join(delivery_modes)))
 
     _print_doctor(results)
-    return 0
+    has_warn = any(status == "WARN" for status, _, _ in results)
+    return 1 if strict and has_warn else 0
 
 
 def _print_doctor(results: list[tuple[str, str, str]]) -> None:
@@ -497,11 +518,12 @@ def main(argv: list[str] | None = None) -> int:
         args.delivery = getattr(args, "delivery", "stdout")
         args.output = getattr(args, "output", None)
         args.sort_order = getattr(args, "sort_order", "relevance")
+        args.max_items = getattr(args, "max_items", 0)
     if args.command == "init":
         _write_minimal_config(args.config, force=args.force)
         return 0
     if args.command == "doctor":
-        return _doctor(args.config)
+        return _doctor(args.config, strict=getattr(args, "strict", False))
     return _run_pipeline(args)
 
 

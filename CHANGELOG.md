@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimalist CLI subcommands: `run`, `init`, and `doctor`
 - Dedicated CLI ergonomics reference (`docs/CLI.md`)
 - Small CLI workflow integration tests (`run` stdout/atom + `doctor`)
+- JSON delivery mode for script-friendly output
+- Output capping via `--max-items`
+- Strict doctor mode (`doctor --strict`) for release/CI gating
 
 ### Changed
 - Migrated project to uv for dependency management

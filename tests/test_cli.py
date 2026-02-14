@@ -44,3 +44,24 @@ def test_doctor_success_with_loaded_config(tmp_path, monkeypatch):
 
     exit_code = main(["doctor", "--config", str(config_path)])
     assert exit_code == 0
+
+
+def test_doctor_strict_fails_on_warning(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("placeholder: true\n", encoding="utf-8")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    monkeypatch.setattr(
+        "paperweight.main.load_config",
+        lambda config_path: {
+            "arxiv": {"categories": ["cs.AI"]},
+            "processor": {"keywords": ["agents"]},
+            "analyzer": {"type": "abstract", "llm_provider": "openai"},
+            "triage": {"enabled": True, "llm_provider": "openai"},
+            "logging": {"level": "INFO"},
+        },
+    )
+
+    exit_code = main(["doctor", "--config", str(config_path), "--strict"])
+    assert exit_code == 1

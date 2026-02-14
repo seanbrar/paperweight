@@ -19,12 +19,15 @@ Options:
 - `--config PATH`: config file path (`config.yaml` default)
 - `--force-refresh`: ignore watermark and fetch recent window
 - `--delivery stdout|atom|email`: output adapter (`stdout` default)
+- `--delivery stdout|json|atom|email`: output adapter (`stdout` default)
 - `--output PATH`: write stdout/atom output to file
 - `--sort-order relevance|alphabetical|publication_time`
+- `--max-items N`: cap number of delivered items (`0` = no cap)
 
 Expected outputs:
 
 - `stdout`: deterministic plain text digest
+- `json`: deterministic JSON digest for scripting
 - `atom`: Atom XML feed content
 - `email`: sends email if notifier config is present
 
@@ -54,6 +57,7 @@ Purpose: fast local diagnostics without running the full pipeline.
 Options:
 
 - `--config PATH`: config file path (`config.yaml` default)
+- `--strict`: return non-zero if any warnings are found
 
 Checks:
 

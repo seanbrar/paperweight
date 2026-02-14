@@ -4,6 +4,7 @@ paperweight's default delivery is a deterministic stdout digest. Atom feed and
 email delivery are optional adapters.
 """
 
+import json
 import logging
 import smtplib
 from datetime import datetime, timezone
@@ -101,6 +102,26 @@ def render_atom_feed(
 
     xml_bytes = ET.tostring(feed, encoding="utf-8", xml_declaration=True)
     return xml_bytes.decode("utf-8")
+
+
+def render_json_digest(
+    papers: List[Dict[str, Any]], *, sort_order: str = "relevance"
+) -> str:
+    """Render a deterministic JSON digest for scripting."""
+    ordered = _sort_papers(papers, sort_order)
+    payload = []
+    for paper in ordered:
+        payload.append(
+            {
+                "title": paper.get("title", "Untitled"),
+                "date": _format_paper_date(paper),
+                "score": paper.get("relevance_score", paper.get("triage_score", 0.0)),
+                "why": paper.get("triage_rationale", ""),
+                "link": paper.get("link", ""),
+                "summary": (paper.get("summary") or "").strip(),
+            }
+        )
+    return json.dumps(payload, indent=2, ensure_ascii=True)
 
 
 def write_output(content: str, output_path: str | None = None) -> None:

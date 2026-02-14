@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from paperweight.notifier import (
     compile_and_send_notifications,
     render_atom_feed,
+    render_json_digest,
     render_text_digest,
     send_email_notification,
     write_output,
@@ -94,3 +95,20 @@ def test_write_output_to_file(tmp_path):
     target = tmp_path / "digest.txt"
     write_output("hello\n", str(target))
     assert target.read_text(encoding="utf-8") == "hello\n"
+
+
+def test_render_json_digest_contains_expected_fields():
+    papers = [
+        {
+            "title": "Test Paper",
+            "date": date(2024, 1, 2),
+            "summary": "Summary text",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "relevance_score": 5.5,
+            "triage_rationale": "Matched core interests",
+        }
+    ]
+    payload = render_json_digest(papers)
+    assert '"title": "Test Paper"' in payload
+    assert '"why": "Matched core interests"' in payload
+    assert '"score": 5.5' in payload

@@ -113,6 +113,8 @@ def mock_main_dependencies(mocker):
     # Mock digest rendering/writing
     mock_render_text_digest = mocker.patch('paperweight.main.render_text_digest')
     mock_render_text_digest.return_value = "digest"
+    mock_render_json_digest = mocker.patch('paperweight.main.render_json_digest')
+    mock_render_json_digest.return_value = "[]"
     mock_write_output = mocker.patch('paperweight.main.write_output')
     mock_render_atom_feed = mocker.patch('paperweight.main.render_atom_feed')
     mock_render_atom_feed.return_value = "<feed/>"
@@ -139,6 +141,7 @@ def mock_main_dependencies(mocker):
         'process_papers': mock_process_papers,
         'get_abstracts': mock_get_abstracts,
         'render_text_digest': mock_render_text_digest,
+        'render_json_digest': mock_render_json_digest,
         'write_output': mock_write_output,
         'render_atom_feed': mock_render_atom_feed,
         'notifications': mock_notifications,
@@ -397,3 +400,10 @@ class TestMainErrorHandling:
         monkeypatch.setattr('sys.argv', ['paperweight', '--delivery', 'email'])
         main()
         mock_main_dependencies['notifications'].assert_called_once()
+
+    def test_json_delivery_uses_json_renderer(self, mock_main_dependencies, monkeypatch):
+        """JSON mode renders JSON payload and writes output."""
+        monkeypatch.setattr('sys.argv', ['paperweight', '--delivery', 'json'])
+        main()
+        mock_main_dependencies['render_json_digest'].assert_called_once()
+        mock_main_dependencies['write_output'].assert_called_once()
