@@ -22,7 +22,7 @@ processor:
   min_score: 10
 
 analyzer:
-  type: summary  # summary | abstract
+  type: abstract  # summary | abstract
   llm_provider: openai  # openai | gemini
   # api_key: ${OPENAI_API_KEY}
   max_input_tokens: 7000

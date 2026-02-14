@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AI-first title/abstract triage stage with rationale/score annotations
 - Content hydration helper to fetch full text only for shortlisted papers
 - Minimalist CLI subcommands: `run`, `init`, and `doctor`
+- Dedicated CLI ergonomics reference (`docs/CLI.md`)
+- Small CLI workflow integration tests (`run` stdout/atom + `doctor`)
 
 ### Changed
 - Migrated project to uv for dependency management

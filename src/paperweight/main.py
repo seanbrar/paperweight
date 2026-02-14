@@ -65,7 +65,7 @@ processor:
   min_score: 10
 
 analyzer:
-  type: summary
+  type: abstract
   llm_provider: openai
   max_input_tokens: 7000
   max_input_chars: 20000
@@ -350,6 +350,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Backward-compatible default: `paperweight [run-args]` == `paperweight run [run-args]`
     known_commands = {"run", "init", "doctor"}
+    if args_list and args_list[0] in {"-h", "--help"}:
+        return parser.parse_args(args_list)
     if args_list and args_list[0] in known_commands:
         return parser.parse_args(args_list)
 
@@ -487,6 +489,14 @@ def _run_pipeline(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     args = _parse_args(argv)
+    if args.command is None:
+        # No subcommand means default run mode.
+        args.command = "run"
+        args.config = getattr(args, "config", "config.yaml")
+        args.force_refresh = getattr(args, "force_refresh", False)
+        args.delivery = getattr(args, "delivery", "stdout")
+        args.output = getattr(args, "output", None)
+        args.sort_order = getattr(args, "sort_order", "relevance")
     if args.command == "init":
         _write_minimal_config(args.config, force=args.force)
         return 0

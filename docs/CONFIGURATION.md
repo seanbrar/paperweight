@@ -21,7 +21,7 @@ processor:
   min_score: 10
 
 analyzer:
-  type: summary  # abstract | summary
+  type: abstract  # abstract | summary
   llm_provider: openai  # openai | gemini
 
 triage:

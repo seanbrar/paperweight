@@ -85,6 +85,8 @@ paperweight init
 paperweight doctor
 ```
 
+Detailed command ergonomics: `/Users/sean/GitHub/paperweight/docs/CLI.md`
+
 ## Configuration
 
 Main sections:
