@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, cast
 
 from pollux import Config, RetryPolicy, Source, run
 
@@ -190,8 +190,9 @@ def triage_papers(
                 shortlisted.append(paper)
         return shortlisted[:max_selected]
 
+    provider_name = cast(ProviderName, provider)
     pollux_config = Config(
-        provider=provider,
+        provider=provider_name,
         model=model,
         api_key=api_key,
         retry=RetryPolicy(max_attempts=2, initial_delay_s=1.0, max_delay_s=5.0),

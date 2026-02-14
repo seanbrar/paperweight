@@ -95,6 +95,7 @@ line-ending = "auto"
 
 [tool.mypy]
 mypy_path = "src"
+exclude = ['^src/mocks/']
 
 [[tool.mypy.overrides]]
 module = "arxiv.*"
