@@ -97,6 +97,10 @@ def mock_main_dependencies(mocker):
     # Mock paper fetching and processing
     mock_get_recent_papers = mocker.patch('paperweight.main.get_recent_papers')
     mock_get_recent_papers.return_value = [{"id": "1234.5678", "title": "Test Paper"}]
+    mock_triage_papers = mocker.patch("paperweight.main.triage_papers")
+    mock_triage_papers.side_effect = lambda papers, _config: papers
+    mock_hydrate_papers = mocker.patch("paperweight.main.hydrate_papers_with_content")
+    mock_hydrate_papers.side_effect = lambda papers, _config: papers
 
     mock_process_papers = mocker.patch('paperweight.main.process_papers')
     mock_process_papers.return_value = [
@@ -130,6 +134,8 @@ def mock_main_dependencies(mocker):
         'load_config': mock_load_config,
         'setup_logging': mock_setup_logging,
         'get_recent_papers': mock_get_recent_papers,
+        'triage_papers': mock_triage_papers,
+        'hydrate_papers_with_content': mock_hydrate_papers,
         'process_papers': mock_process_papers,
         'get_abstracts': mock_get_abstracts,
         'render_text_digest': mock_render_text_digest,
@@ -377,6 +383,11 @@ class TestMainErrorHandling:
     def test_default_delivery_writes_digest(self, mock_main_dependencies):
         """Default mode renders and writes stdout digest."""
         main()
+        mock_main_dependencies['get_recent_papers'].assert_called_once_with(
+            mock_main_dependencies['load_config'].return_value, include_content=False
+        )
+        mock_main_dependencies['triage_papers'].assert_called_once()
+        mock_main_dependencies['hydrate_papers_with_content'].assert_called_once()
         mock_main_dependencies['render_text_digest'].assert_called_once()
         mock_main_dependencies['write_output'].assert_called_once()
         mock_main_dependencies['notifications'].assert_not_called()

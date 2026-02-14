@@ -24,12 +24,27 @@ analyzer:
   type: summary  # abstract | summary
   llm_provider: openai  # openai | gemini
 
+triage:
+  enabled: true
+  llm_provider: openai  # openai | gemini
+  min_score: 60
+  max_selected: 25
+
 logging:
   level: INFO
   file: paperweight.log
 ```
 
 With this config, `paperweight` outputs a digest to `stdout`.
+
+## How triage works
+
+1. Fetch metadata from arXiv.
+2. Run AI triage on title + abstract (`triage` section).
+3. Fetch full content only for shortlisted papers.
+4. Run processor/analyzer on that smaller set.
+
+This keeps runtime lower than downloading full text for every candidate.
 
 ## Optional sections
 
@@ -97,7 +112,12 @@ export PAPERWEIGHT_MAX_RESULTS=100
 
 ## Analyzer keys
 
-When `analyzer.type: summary`, API key is required:
+When `analyzer.type: summary`, API key is required.
+
+When `triage.enabled: true`, an API key is strongly recommended. Without one,
+paperweight falls back to a lightweight keyword/abstract heuristic.
+
+Provider keys:
 
 - `OPENAI_API_KEY` for OpenAI
 - `GEMINI_API_KEY` for Gemini

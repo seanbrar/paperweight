@@ -14,6 +14,7 @@ The goal is simple: stop reading papers you do not care about.
 paperweight gives you:
 
 - fast shortlist generation from selected arXiv categories
+- AI triage on title+abstract before expensive content processing
 - optional AI summaries (OpenAI/Gemini via Pollux)
 - deterministic output you can script around
 
@@ -80,6 +81,7 @@ paperweight --delivery email
 Main sections:
 
 - `arxiv`: categories and max results
+- `triage`: AI shortlist settings (title + abstract gate)
 - `processor`: keyword-based scoring settings
 - `analyzer`: `abstract` or `summary`
 - `logging`: log level/file

@@ -86,9 +86,13 @@ def calculate_paper_score(paper, config):
     score = 0
     score_breakdown = {}
     # Keyword matching
-    title_keywords = count_keywords(paper["title"], config["keywords"])
-    abstract_keywords = count_keywords(paper["abstract"], config["keywords"])
-    content_keywords = count_keywords(paper["content"], config["keywords"])
+    title = paper.get("title", "")
+    abstract = paper.get("abstract", "")
+    content = paper.get("content", "")
+
+    title_keywords = count_keywords(title, config["keywords"])
+    abstract_keywords = count_keywords(abstract, config["keywords"])
+    content_keywords = count_keywords(content, config["keywords"])
 
     max_title_score = 50
     max_abstract_score = 50
@@ -110,7 +114,7 @@ def calculate_paper_score(paper, config):
     }
 
     # Exclusion list
-    exclusion_count = count_keywords(paper["content"], config["exclusion_keywords"])
+    exclusion_count = count_keywords(content, config["exclusion_keywords"])
     exclusion_score = min(
         exclusion_count * config["exclusion_keyword_penalty"], max_content_score
     )
@@ -118,9 +122,7 @@ def calculate_paper_score(paper, config):
     score_breakdown["exclusion_penalty"] = -round(exclusion_score, 2)
 
     # Simple text analysis
-    important_word_count = count_important_words(
-        paper["content"], config["important_words"]
-    )
+    important_word_count = count_important_words(content, config["important_words"])
     important_word_score = min(
         important_word_count * config["important_words_weight"], max_content_score
     )

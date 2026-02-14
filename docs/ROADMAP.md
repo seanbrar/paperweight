@@ -33,14 +33,14 @@ The default experience must be:
 
 ### AI and ranking
 
-- [ ] Make AI relevance judgment core for triage (title + abstract first).
+- [x] Make AI relevance judgment core for triage (title + abstract first).
 - [ ] Keep summarization bounded with hard input limits.
 - [ ] Produce one-line "why this matched" rationale for each paper.
 
 ### Performance
 
-- [ ] Stop downloading full content for all candidates by default.
-- [ ] Fetch/extract full text only for shortlisted papers.
+- [x] Stop downloading full content for all candidates by default.
+- [x] Fetch/extract full text only for shortlisted papers.
 - [ ] Add simple local caching for fetched metadata by run.
 
 ### Docs

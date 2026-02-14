@@ -304,11 +304,52 @@ def fetch_paper_contents(paper_ids):
     return contents
 
 
-def get_recent_papers(config, force_refresh=False):
+def _hydrate_papers_with_content(papers, config, db_enabled):
+    """Attach extracted content/artifacts to paper metadata."""
+    if not papers:
+        return []
+
+    paper_ids = [paper["link"].split("/abs/")[-1] for paper in papers]
+    contents = fetch_paper_contents(paper_ids)
+
+    papers_with_content = []
+    storage_base = config.get("storage", {}).get("base_dir", "data/artifacts")
+    for paper, (paper_id, content, method) in zip(papers, contents):
+        if content:
+            logger.debug(f"Extracting text for paper ID: {paper_id}")
+            text = extract_text_from_source(content, method)
+
+            artifacts = []
+            if db_enabled:
+                artifacts = _store_artifacts(paper_id, method, content, text, storage_base)
+
+            paper_with_content = dict(paper)
+            paper_with_content.update(
+                {
+                    "id": paper_id,
+                    "content": text,
+                    "content_type": method,
+                    "artifacts": artifacts,
+                }
+            )
+            papers_with_content.append(paper_with_content)
+
+    logger.info("Hydrated %s/%s papers with full content", len(papers_with_content), len(papers))
+    return papers_with_content
+
+
+def hydrate_papers_with_content(papers, config):
+    """Public helper to fetch/extract full content for an existing shortlist."""
+    db_enabled = config.get("db", {}).get("enabled", False)
+    return _hydrate_papers_with_content(papers, config, db_enabled)
+
+
+def get_recent_papers(config, force_refresh=False, include_content=True):
     """Get recent papers, either from cache or by fetching new ones.
 
     Args:
         force_refresh: If True, ignore cache and fetch new papers.
+        include_content: If True, fetch and extract full paper content.
 
     Returns:
         List of dictionaries containing paper metadata.
@@ -348,47 +389,41 @@ def get_recent_papers(config, force_refresh=False):
     logger.info(f"Fetching papers for the last {days} days")
     recent_papers = fetch_recent_papers(config, days)
     logger.info(f"Fetched {len(recent_papers)} recent papers")
-    paper_ids = [paper["link"].split("/abs/")[-1] for paper in recent_papers]
 
-    contents = fetch_paper_contents(paper_ids)
-
-    papers_with_content = []
-    storage_base = config.get("storage", {}).get("base_dir", "data/artifacts")
-    for paper, (paper_id, content, method) in zip(recent_papers, contents):
-        if content:
-            logger.debug(f"Extracting text for paper ID: {paper_id}")
-            text = extract_text_from_source(content, method)
-
-            artifacts = []
-            if db_enabled:
-                artifacts = _store_artifacts(
-                    paper_id, method, content, text, storage_base
-                )
-            papers_with_content.append(
+    papers_result = recent_papers
+    if include_content:
+        papers_result = _hydrate_papers_with_content(recent_papers, config, db_enabled)
+    else:
+        papers_result = []
+        for paper in recent_papers:
+            paper_id = paper["link"].split("/abs/")[-1]
+            paper_without_content = dict(paper)
+            paper_without_content.update(
                 {
                     "id": paper_id,
-                    "title": paper["title"],
-                    "link": paper["link"],
-                    "date": paper["date"],
-                    "abstract": paper["abstract"],
-                    "content": text,
-                    "content_type": method,
-                    "artifacts": artifacts,
+                    "content": "",
+                    "content_type": None,
+                    "artifacts": [],
                 }
             )
+            papers_result.append(paper_without_content)
 
-    if papers_with_content and used_local_watermark:
+    if recent_papers and used_local_watermark:
         save_last_processed_date(current_date)
         logger.info(
-            "Processed %s papers. Last processed date updated to %s",
-            len(papers_with_content),
+            "Processed fetch window (%s papers). Last processed date updated to %s",
+            len(recent_papers),
             current_date,
         )
     else:
         logger.info("No new papers found.")
 
-    logger.info(f"Returning {len(papers_with_content)} papers with content")
-    return papers_with_content
+    logger.info(
+        "Returning %s papers (%s content)",
+        len(papers_result),
+        "with" if include_content else "without",
+    )
+    return papers_result
 
 
 def _store_artifacts(paper_id, method, content, text, storage_base):

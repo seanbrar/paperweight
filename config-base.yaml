@@ -28,6 +28,14 @@ analyzer:
   max_input_tokens: 7000
   max_input_chars: 20000
 
+# AI-first shortlist gate (title + abstract)
+triage:
+  enabled: true
+  llm_provider: openai  # openai | gemini
+  # api_key: ${OPENAI_API_KEY}
+  min_score: 60
+  max_selected: 25
+
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
   file: paperweight.log

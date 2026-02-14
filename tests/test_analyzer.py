@@ -6,7 +6,7 @@ external LLM providers to generate summaries, including fallback behavior.
 
 import pytest
 
-from paperweight.analyzer import get_abstracts, summarize_paper
+from paperweight.analyzer import get_abstracts, summarize_paper, triage_papers
 
 
 class TestSummarizePaper:
@@ -51,3 +51,50 @@ class TestGetAbstracts:
         config = {"type": "invalid_type"}
         with pytest.raises(ValueError, match="Unknown analysis type: invalid_type"):
             get_abstracts([{"abstract": "Test abstract"}], config)
+
+
+class TestTriagePapers:
+    """Tests for AI triage stage."""
+
+    def test_triage_uses_llm_decision(self, mocker):
+        mocker.patch(
+            "paperweight.analyzer.run",
+            return_value={
+                "answers": [
+                    '{"include": true, "score": 92, "rationale": "Strong profile match"}'
+                ]
+            },
+        )
+        papers = [
+            {
+                "title": "Transformers for Agents",
+                "abstract": "A paper about language agents and planning.",
+                "link": "http://arxiv.org/abs/2401.12345",
+            }
+        ]
+        config = {
+            "triage": {"enabled": True, "llm_provider": "openai", "api_key": "key"},
+            "processor": {"keywords": ["agents", "planning"]},
+            "analyzer": {},
+        }
+        shortlisted = triage_papers(papers, config)
+        assert len(shortlisted) == 1
+        assert shortlisted[0]["triage_score"] == 92
+        assert "Strong profile match" in shortlisted[0]["triage_rationale"]
+
+    def test_triage_falls_back_without_api_key(self):
+        papers = [
+            {
+                "title": "Transformers for Agents",
+                "abstract": "A paper about language agents and planning.",
+                "link": "http://arxiv.org/abs/2401.12345",
+            }
+        ]
+        config = {
+            "triage": {"enabled": True, "llm_provider": "openai", "min_score": 10},
+            "processor": {"keywords": ["agents"]},
+            "analyzer": {"type": "abstract"},
+        }
+        shortlisted = triage_papers(papers, config)
+        assert len(shortlisted) == 1
+        assert shortlisted[0]["triage_score"] >= 10

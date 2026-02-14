@@ -12,7 +12,7 @@ import traceback
 import requests
 import yaml
 
-from paperweight.analyzer import get_abstracts
+from paperweight.analyzer import get_abstracts, triage_papers
 from paperweight.db import DatabaseConnectionError, connect_db, is_db_enabled
 from paperweight.logging_config import setup_logging
 from paperweight.notifier import (
@@ -22,7 +22,7 @@ from paperweight.notifier import (
     write_output,
 )
 from paperweight.processor import process_papers
-from paperweight.scraper import get_recent_papers
+from paperweight.scraper import get_recent_papers, hydrate_papers_with_content
 from paperweight.storage import (
     create_run,
     finish_run,
@@ -36,7 +36,7 @@ from paperweight.utils import get_package_version, hash_config, load_config
 logger = logging.getLogger(__name__)
 
 
-def setup_and_get_papers(force_refresh):
+def setup_and_get_papers(force_refresh, include_content=True):
     """Set up the application and fetch papers.
 
     Args:
@@ -53,9 +53,14 @@ def setup_and_get_papers(force_refresh):
 
     if force_refresh:
         logger.info("Force refresh requested. Ignoring last processed date.")
-        return get_recent_papers(config, force_refresh=True), config
+        return (
+            get_recent_papers(
+                config, force_refresh=True, include_content=include_content
+            ),
+            config,
+        )
     else:
-        return get_recent_papers(config), config
+        return get_recent_papers(config, include_content=include_content), config
 
 
 def get_summary_model(config):
@@ -228,6 +233,16 @@ def _deliver_output(processed_papers, config, args):
         logger.warning("Failed to send notifications")
 
 
+def _apply_triage_and_hydrate(recent_papers, config):
+    """AI triage on metadata, then fetch full content only for shortlisted papers."""
+    triaged_papers = triage_papers(recent_papers, config)
+    if not triaged_papers:
+        logger.info("AI triage selected no papers. Exiting.")
+        return []
+
+    return hydrate_papers_with_content(triaged_papers, config)
+
+
 def main():
     """Main entry point for the paperweight application.
 
@@ -269,13 +284,16 @@ def main():
     db_enabled = False
 
     try:
-        recent_papers, config = setup_and_get_papers(args.force_refresh)
+        recent_papers, config = setup_and_get_papers(
+            args.force_refresh, include_content=False
+        )
+        shortlisted_papers = _apply_triage_and_hydrate(recent_papers, config)
         db_enabled = is_db_enabled(config)
 
         if db_enabled:
-            run_id, paper_id_map = _initialize_db_run(config, recent_papers)
+            run_id, paper_id_map = _initialize_db_run(config, shortlisted_papers)
 
-        processed_papers = process_and_summarize_papers(recent_papers, config)
+        processed_papers = process_and_summarize_papers(shortlisted_papers, config)
 
         if db_enabled and run_id and processed_papers:
             _persist_results(config, run_id, processed_papers, paper_id_map)

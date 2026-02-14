@@ -8,6 +8,7 @@ from paperweight.scraper import (
     extract_text_from_source,
     fetch_arxiv_papers,
     get_recent_papers,
+    hydrate_papers_with_content,
 )
 
 
@@ -126,3 +127,54 @@ def test_get_recent_papers_db_unreachable():
     with patch('paperweight.scraper.connect_db', side_effect=Exception("boom")):
         with pytest.raises(DatabaseConnectionError, match="Database enabled but unreachable"):
             get_recent_papers(config)
+
+
+def test_hydrate_papers_with_content(monkeypatch):
+    papers = [
+        {
+            "title": "Test Paper",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "date": datetime(2024, 1, 15).date(),
+            "abstract": "Test abstract",
+        }
+    ]
+    config = {"db": {"enabled": False}}
+
+    monkeypatch.setattr(
+        "paperweight.scraper.fetch_paper_contents",
+        lambda _ids: [("2401.12345", b"pdf-bytes", "pdf")],
+    )
+    monkeypatch.setattr(
+        "paperweight.scraper.extract_text_from_source", lambda _content, _method: "text"
+    )
+
+    hydrated = hydrate_papers_with_content(papers, config)
+    assert len(hydrated) == 1
+    assert hydrated[0]["id"] == "2401.12345"
+    assert hydrated[0]["content"] == "text"
+
+
+def test_get_recent_papers_without_content(monkeypatch):
+    config = {
+        "arxiv": {"categories": ["cs.AI"], "max_results": 2},
+        "db": {"enabled": False},
+    }
+    fake_papers = [
+        {
+            "title": "Test Paper",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "date": datetime(2024, 1, 15).date(),
+            "abstract": "Test abstract",
+        }
+    ]
+
+    monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
+    monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
+    monkeypatch.setattr("paperweight.scraper.fetch_recent_papers", lambda _c, _d: fake_papers)
+    fetch_content = MagicMock()
+    monkeypatch.setattr("paperweight.scraper.fetch_paper_contents", fetch_content)
+
+    papers = get_recent_papers(config, force_refresh=True, include_content=False)
+    assert len(papers) == 1
+    assert papers[0]["content"] == ""
+    fetch_content.assert_not_called()

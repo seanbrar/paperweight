@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test suite with integration and unit tests
 - Deterministic text digest rendering for stdout/file workflows
 - Atom feed rendering for secondary delivery workflows
+- AI-first title/abstract triage stage with rationale/score annotations
+- Content hydration helper to fetch full text only for shortlisted papers
 
 ### Changed
 - Migrated project to uv for dependency management
@@ -22,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI delivery modes now support `stdout` (default), `atom`, and optional `email`
 - Configuration validation now treats notifier/email as optional unless email delivery is used
 - Roadmap and docs rewritten around a simplified v0.2 direction
+- Main pipeline now runs metadata triage before expensive content extraction
 
 ### Fixed
 - Improved error handling throughout the codebase

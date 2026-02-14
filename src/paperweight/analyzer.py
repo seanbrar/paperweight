@@ -5,8 +5,10 @@ The pipeline passes the *analyzer section* of the config into this module
 """
 
 import asyncio
+import json
 import logging
-from typing import Any, Dict, Literal
+import os
+from typing import Any, Dict, List, Literal
 
 from pollux import Config, RetryPolicy, Source, run
 
@@ -75,6 +77,151 @@ def _default_model_for_provider(provider: str) -> str:
     if provider == "gemini":
         return "gemini-2.5-flash-lite"
     return ""
+
+
+def _resolve_triage_model_config(
+    full_config: Dict[str, Any],
+) -> tuple[str, str, str, float, int]:
+    """Resolve provider/model/key and thresholds for triage mode."""
+    triage_cfg = full_config.get("triage", {})
+    analyzer_cfg = full_config.get("analyzer", {})
+
+    provider = (
+        triage_cfg.get("llm_provider")
+        or analyzer_cfg.get("llm_provider")
+        or "openai"
+    ).lower()
+    model = triage_cfg.get("model") or _default_model_for_provider(provider)
+    api_key = (
+        triage_cfg.get("api_key")
+        or analyzer_cfg.get("api_key")
+        or os.getenv(f"{provider.upper()}_API_KEY")
+        or ""
+    )
+    min_score = float(triage_cfg.get("min_score", 60.0))
+    max_selected = int(triage_cfg.get("max_selected", 25))
+    return provider, model, api_key, min_score, max_selected
+
+
+def _heuristic_triage_score(paper: Dict[str, Any], profile_terms: List[str]) -> float:
+    text = f"{paper.get('title', '')}\n{paper.get('abstract', '')}".lower()
+    hits = 0
+    for term in profile_terms:
+        if term and term.lower() in text:
+            hits += 1
+    if not profile_terms:
+        return 50.0
+    return min(100.0, 100.0 * (hits / len(profile_terms)))
+
+
+def _triage_one_paper(
+    paper: Dict[str, Any],
+    pollux_config: Config,
+    profile: str,
+    *,
+    min_score: float,
+) -> Dict[str, Any]:
+    title = (paper.get("title") or "").strip()
+    abstract = (paper.get("abstract") or "").strip()
+
+    prompt = (
+        "You are triaging arXiv papers for relevance.\n"
+        "Return JSON only with keys: include (boolean), score (0-100 number), rationale (string).\n"
+        "Be strict. Include only if likely useful to the profile.\n\n"
+        f"Profile:\n{profile}\n\n"
+        f"Title: {title}\n\n"
+        f"Abstract:\n{abstract}\n"
+    )
+
+    result = asyncio.run(run(prompt, config=pollux_config))
+    response = None
+    if isinstance(result, dict):
+        answers = result.get("answers")
+        if isinstance(answers, list) and answers:
+            response = answers[0]
+    if not response:
+        return {
+            "include": False,
+            "score": 0.0,
+            "rationale": "No model response",
+        }
+
+    raw = str(response).strip()
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        raw = raw[start : end + 1]
+
+    parsed = json.loads(raw)
+    score = float(parsed.get("score", 0.0))
+    include = bool(parsed.get("include", score >= min_score))
+    rationale = str(parsed.get("rationale", "")).strip()
+    return {"include": include, "score": score, "rationale": rationale}
+
+
+def triage_papers(
+    papers: List[Dict[str, Any]],
+    full_config: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """AI-first triage using title+abstract before expensive content processing."""
+    if not papers:
+        return []
+
+    triage_cfg = full_config.get("triage", {})
+    if not triage_cfg.get("enabled", True):
+        return papers
+
+    provider, model, api_key, min_score, max_selected = _resolve_triage_model_config(
+        full_config
+    )
+    profile_terms = full_config.get("processor", {}).get("keywords", [])
+    profile_text = "\n".join(f"- {term}" for term in profile_terms if term)
+
+    if provider not in ("openai", "gemini") or not api_key:
+        logger.warning(
+            "AI triage is enabled but provider/key is unavailable; using heuristic triage."
+        )
+        shortlisted = []
+        for paper in papers:
+            score = _heuristic_triage_score(paper, profile_terms)
+            paper["triage_score"] = score
+            paper["triage_rationale"] = "Keyword/abstract heuristic fallback"
+            if score >= min_score:
+                shortlisted.append(paper)
+        return shortlisted[:max_selected]
+
+    pollux_config = Config(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        retry=RetryPolicy(max_attempts=2, initial_delay_s=1.0, max_delay_s=5.0),
+    )
+
+    shortlisted = []
+    for paper in papers:
+        try:
+            decision = _triage_one_paper(
+                paper,
+                pollux_config,
+                profile_text,
+                min_score=min_score,
+            )
+        except Exception as e:
+            logger.warning("AI triage failed for '%s': %s", paper.get("title", ""), e)
+            score = _heuristic_triage_score(paper, profile_terms)
+            decision = {
+                "include": score >= min_score,
+                "score": score,
+                "rationale": "LLM error; keyword/abstract heuristic fallback",
+            }
+
+        paper["triage_score"] = float(decision["score"])
+        paper["triage_rationale"] = decision["rationale"]
+        if decision["include"] and float(decision["score"]) >= min_score:
+            shortlisted.append(paper)
+
+    logger.info("AI triage selected %s/%s papers", len(shortlisted), len(papers))
+    return shortlisted[:max_selected]
 
 
 def summarize_paper(paper: Dict[str, Any], config: Dict[str, Any]) -> str:
