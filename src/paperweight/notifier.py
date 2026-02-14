@@ -21,14 +21,16 @@ def _sort_papers(papers: List[Dict[str, Any]], sort_order: str) -> List[Dict[str
     if sort_order == "alphabetical":
         return sorted(papers, key=lambda x: x.get("title", "").lower())
     if sort_order == "publication_time":
-        return sorted(papers, key=lambda x: x.get("date"), reverse=True)
+        return sorted(papers, key=_format_paper_date, reverse=True)
     return list(papers)
 
 
 def _format_paper_date(paper: Dict[str, Any]) -> str:
     value = paper.get("date")
-    if hasattr(value, "isoformat"):
+    if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, str):
+        return value
     return str(value or "")
 
 

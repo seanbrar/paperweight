@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 import logging
 import sys
 import time
@@ -80,7 +81,7 @@ def export_latest_email():
     return export_email.save_email(markdown, message_id)
 
 
-def main():
+def main():  # noqa: C901
     logger.info("🚀 Starting Paperweight Dev Integration Test...")
     config = load_config()
     setup_logging(config["logging"])

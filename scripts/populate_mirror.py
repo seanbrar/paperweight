@@ -350,8 +350,14 @@ def process_golden_set(client: arxiv.Client, conn: sqlite3.Connection,
         download_paper_by_id(client, pid, conn, db_statuses.get(pid), dry_run=dry_run, max_size_mb=max_size_mb)
 
 
-def bulk_fill(client: arxiv.Client, conn: sqlite3.Connection, count: int = 20,
-              categories: List[str] = None, dry_run: bool = False, max_size_mb: float = DEFAULT_MAX_SIZE_MB):
+def bulk_fill(
+    client: arxiv.Client,
+    conn: sqlite3.Connection,
+    count: int = 20,
+    categories: Optional[List[str]] = None,
+    dry_run: bool = False,
+    max_size_mb: float = DEFAULT_MAX_SIZE_MB,
+):
     """
     Download random papers from target categories.
     Optimized: Reuses paper metadata from search results, batch DB checks.

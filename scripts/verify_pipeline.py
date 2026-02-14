@@ -1,6 +1,6 @@
 import logging
+import os
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -25,7 +25,7 @@ def load_config():
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
-def verify_pipeline(config):
+def verify_pipeline(config):  # noqa: C901
     logger.info("🧪 Verifying Pipeline (Scraper -> Processor -> Analyzer)...")
 
     # Override config for fast testing
@@ -87,7 +87,6 @@ def verify_pipeline(config):
     logger.info(f"   Provider: {provider}")
 
     # Check for API keys
-    import os
     if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
          logger.warning("⚠️  OPENAI_API_KEY not found. Skipping Analyzer call.")
          return True
