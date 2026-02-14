@@ -1,72 +1,79 @@
 # paperweight roadmap
 
-This roadmap replaces the previous feature backlog.
-The focus is a useful, low-friction product in `v0.2`, not a distant `v1.0`.
+This roadmap is metric-driven. Feature work is only accepted if it improves usefulness:
+time saved, setup simplicity, and digest quality.
 
-## Product thesis
+## Product definition
 
-paperweight should save time by doing high-signal triage on arXiv papers and
-producing a short digest users can trust.
+paperweight should be better than "just checking arXiv" when the user wants:
 
-The default experience must be:
+- a smaller daily reading queue
+- deterministic output that can be automated
+- relevance filtering that improves over time
 
-1. zero setup beyond a config file and LLM key
-2. fast enough to run frequently
-3. deterministic, scriptable output
+## Core success metrics
 
-## Principles (DOTADIW + YAGNI)
+These metrics guide all releases:
 
-- Default to the simplest path that works.
-- Do not require SMTP, Postgres, or dashboards for baseline usage.
-- Keep one clear interface and one clear output model.
-- Add adapters only when they materially improve delivery.
-- Prefer deleting complexity over abstracting it.
+1. **Time to first useful run**
+   - target: <= 5 minutes from install to first digest
+2. **Daily digest size**
+   - target: median 5-20 items after user tuning
+3. **Runtime**
+   - target: <= 120 seconds for `3 categories x max_results=50` on default non-summary mode
+4. **CLI reliability**
+   - target: >= 99% successful runs in local smoke workflows
+5. **Signal quality (human-evaluated)**
+   - target: >= 7/10 items marked "worth reading" in pilot usage
 
-## v0.2 (MVP that is already good)
+## v0.2 release gates (must pass)
 
-### UX and interface
+1. CLI contract stable:
+   - `run`, `init`, `doctor`
+   - `run` delivery: `stdout`, `json`, `atom`, optional `email`
+2. Zero-key baseline works:
+   - `init` defaults to `analyzer.type: abstract`
+   - `run` works without LLM keys via triage fallback
+3. Setup validation:
+   - `doctor --strict` returns non-zero on warnings/failures
+4. Output ergonomics:
+   - deterministic text digest
+   - scriptable JSON
+   - Atom feed export
+5. Quality checks:
+   - lint clean
+   - tests green (including small CLI integration suite)
+6. Packaging:
+   - release workflow present and tag-driven
 
-- [x] Default delivery is deterministic `stdout` digest.
-- [x] Add Atom feed output as a secondary delivery format.
-- [x] Add `paperweight init` for minimal config bootstrap.
-- [x] Add `paperweight doctor` for config/env/provider checks.
+## v0.3 focus (quality lift, not surface-area lift)
 
-### AI and ranking
+1. **Speed**
+   - add metadata cache
+   - target: >= 40% runtime reduction on repeated daily runs
+2. **Digest quality**
+   - improve triage rationale quality and compactness
+   - target: rationale present on >= 95% of shortlisted items
+3. **Workflow fit**
+   - add saved presets/profile switching
+   - target: switch profile in one command, no config edits
 
-- [x] Make AI relevance judgment core for triage (title + abstract first).
-- [ ] Keep summarization bounded with hard input limits.
-- [ ] Produce one-line "why this matched" rationale for each paper.
+## v0.4 focus (feedback loop)
 
-### Performance
+1. add local feedback capture (`relevant` / `irrelevant`)
+2. incorporate feedback into ranking
+3. target: +20% improvement in user-rated relevance from v0.2 baseline
 
-- [x] Stop downloading full content for all candidates by default.
-- [x] Fetch/extract full text only for shortlisted papers.
-- [ ] Add simple local caching for fetched metadata by run.
+## v1.0 criteria
 
-### Docs
+1. stable CLI and config semantics
+2. upgrade path documented for all `v0.x` users
+3. reproducible, deterministic outputs for identical inputs/config
+4. reliability and quality metrics sustained for two consecutive minor releases
 
-- [ ] Rewrite README around "5-minute first digest".
-- [ ] Remove claims not implemented in code.
-- [ ] Document output formats and scripting examples.
+## Non-goals (until metrics justify)
 
-## v0.3-v0.5 (quality and fit)
-
-- [ ] Tighten scoring quality using user feedback signals.
-- [ ] Improve digest rendering (grouping, rationale clarity, compact layout).
-- [ ] Add optional adapters where demand exists (email via keychain-backed auth).
-- [ ] Stabilize config schema and migration notes.
-
-## Road to v1.0
-
-`v1.0` means stability and reliability, not a huge scope jump:
-
-- Stable CLI contract and config schema.
-- Strong test coverage on core triage flow.
-- Backward-compatible upgrades from `v0.2+`.
-- Operationally boring: predictable runtime, deterministic outputs, clear failures.
-
-## Explicit non-goals (for now)
-
-- Web app/dashboard before core CLI flow is excellent.
-- Multi-source ingestion before arXiv triage quality is strong.
-- Complex recommendation systems without a validated feedback loop.
+- web dashboard
+- many new paper sources
+- broad plugin systems
+- complex recommendation models without feedback data

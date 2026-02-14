@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON delivery mode for script-friendly output
 - Output capping via `--max-items`
 - Strict doctor mode (`doctor --strict`) for release/CI gating
+- Trusted publishing workflow for release tags (`.github/workflows/release.yml`)
 
 ### Changed
 - Migrated project to uv for dependency management
@@ -32,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Roadmap and docs rewritten around a simplified v0.2 direction
 - Main pipeline now runs metadata triage before expensive content extraction
 - `paperweight` now defaults to `run` for backward-compatible invocation
+- README/CLI/FAQ docs audited and aligned to current behavior
+- Roadmap rewritten with quantifiable usefulness and release metrics
 
 ### Fixed
 - Improved error handling throughout the codebase

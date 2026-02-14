@@ -125,5 +125,6 @@ Provider keys:
 ## CLI + config interaction
 
 - `--delivery stdout` ignores `notifier`.
+- `--delivery json` ignores `notifier`.
 - `--delivery atom` uses optional `feed` metadata.
 - `--delivery email` requires valid `notifier.email` settings.

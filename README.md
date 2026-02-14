@@ -5,26 +5,16 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 paperweight is an arXiv triage CLI.
-It fetches recent papers, ranks them against your interests, and generates a digest.
+It fetches recent papers, filters for relevance, and produces a digest you can read in minutes.
 
-## Why use it
+## Why this exists
 
-The goal is simple: stop reading papers you do not care about.
+Checking arXiv directly is great for discovery. paperweight is for a different job:
 
-paperweight gives you:
-
-- fast shortlist generation from selected arXiv categories
-- AI triage on title+abstract before expensive content processing
-- optional AI summaries (OpenAI/Gemini via Pollux)
-- deterministic output you can script around
-
-## v0.2 direction
-
-- Primary delivery: `stdout` digest
-- Secondary delivery: Atom feed file
-- Optional delivery: email
-
-See `/Users/sean/GitHub/paperweight/docs/ROADMAP.md` for the full plan.
+- keep your daily list short
+- rank by your interests
+- make output scriptable (`stdout`, `json`, `atom`)
+- run the same way every day
 
 ## Install
 
@@ -32,7 +22,7 @@ See `/Users/sean/GitHub/paperweight/docs/ROADMAP.md` for the full plan.
 pip install academic-paperweight
 ```
 
-Or from source:
+From source:
 
 ```bash
 git clone https://github.com/seanbrar/paperweight.git
@@ -41,21 +31,19 @@ uv sync --all-extras
 source .venv/bin/activate
 ```
 
-## Quick start
+## Quick start (works without API keys)
 
-1. Copy `/Users/sean/GitHub/paperweight/config-base.yaml` to `config.yaml`.
-2. Set your LLM API key (required when `analyzer.type: summary`):
-   ```bash
-   export OPENAI_API_KEY=...
-   # or
-   export GEMINI_API_KEY=...
-   ```
-3. Run:
-   ```bash
-   paperweight
-   ```
+```bash
+paperweight init
+paperweight doctor
+paperweight run --force-refresh
+```
 
-This prints the digest to `stdout` by default.
+Notes:
+
+- `init` writes `config.yaml` with safe defaults.
+- default analyzer mode is `abstract` (no summarization API key required).
+- triage can run with heuristic fallback if no key is present.
 
 ## CLI
 
@@ -69,47 +57,48 @@ paperweight doctor [--config PATH] [--strict]
 Examples:
 
 ```bash
-# default stdout digest
+# default plain-text digest to stdout
 paperweight
 
-# write Atom feed
-paperweight --delivery atom --output ./paperweight.xml
+# JSON output for scripts
+paperweight run --delivery json --output ./paperweight.json --max-items 20
 
-# write JSON for scripts
-paperweight --delivery json --output ./paperweight.json
+# Atom feed output
+paperweight run --delivery atom --output ./paperweight.xml
 
 # optional email delivery (requires notifier.email config)
-paperweight --delivery email
+paperweight run --delivery email
 
-# bootstrap a config file
-paperweight init
-
-# validate local setup
-paperweight doctor
+# strict checks for CI/release gates
+paperweight doctor --strict
 ```
 
-Detailed command ergonomics: `/Users/sean/GitHub/paperweight/docs/CLI.md`
+Detailed command behavior: `docs/CLI.md`
 
 ## Configuration
 
-Main sections:
+Core sections:
 
 - `arxiv`: categories and max results
-- `triage`: AI shortlist settings (title + abstract gate)
-- `processor`: keyword-based scoring settings
+- `triage`: shortlist gate (title + abstract)
+- `processor`: scoring config
 - `analyzer`: `abstract` or `summary`
-- `logging`: log level/file
-- `notifier`: optional; required only for email delivery
+- `logging`
+- `notifier` (optional, only for email)
 
-Full details: `/Users/sean/GitHub/paperweight/docs/CONFIGURATION.md`
+See: `docs/CONFIGURATION.md`
+
+## Roadmap
+
+See `docs/ROADMAP.md` for quantified release goals and forward plan.
 
 ## Development
 
 ```bash
-make test
 make lint
+make test
 ```
 
 ## License
 
-MIT. See `/Users/sean/GitHub/paperweight/LICENSE`.
+MIT. See `LICENSE`.

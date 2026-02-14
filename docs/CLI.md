@@ -1,78 +1,73 @@
-# CLI modes and ergonomics
+# CLI reference
 
-This document defines the intended behavior of the paperweight CLI.
+paperweight has three commands:
 
-## Commands
+1. `run`: execute the pipeline and deliver output
+2. `init`: create a minimal config
+3. `doctor`: validate local setup
 
-`paperweight` defaults to `paperweight run` for backwards compatibility.
+`paperweight` is shorthand for `paperweight run`.
 
-1. `paperweight run`
-2. `paperweight init`
-3. `paperweight doctor`
+## run
 
-## `run` mode
+```bash
+paperweight run \
+  [--config PATH] \
+  [--force-refresh] \
+  [--delivery stdout|json|atom|email] \
+  [--output PATH] \
+  [--sort-order relevance|alphabetical|publication_time] \
+  [--max-items N]
+```
 
-Purpose: fetch, triage, process, and deliver a digest.
+Behavior:
 
-Options:
+- fetches recent arXiv papers
+- runs triage on title + abstract
+- hydrates full text only for shortlisted papers
+- scores/summarizes and delivers digest
 
-- `--config PATH`: config file path (`config.yaml` default)
-- `--force-refresh`: ignore watermark and fetch recent window
-- `--delivery stdout|atom|email`: output adapter (`stdout` default)
-- `--delivery stdout|json|atom|email`: output adapter (`stdout` default)
-- `--output PATH`: write stdout/atom output to file
-- `--sort-order relevance|alphabetical|publication_time`
-- `--max-items N`: cap number of delivered items (`0` = no cap)
+Delivery modes:
 
-Expected outputs:
+- `stdout`: plain text digest (default)
+- `json`: script-friendly array of objects
+- `atom`: Atom feed XML
+- `email`: SMTP send via `notifier.email` config
 
-- `stdout`: deterministic plain text digest
-- `json`: deterministic JSON digest for scripting
-- `atom`: Atom XML feed content
-- `email`: sends email if notifier config is present
+`json` fields:
 
-Failure behavior:
+- `title`
+- `date`
+- `score`
+- `why`
+- `link`
+- `summary`
 
-- returns non-zero exit code on config/network/runtime errors
-- email mode fails fast if notifier config is missing
+## init
 
-## `init` mode
+```bash
+paperweight init [--config PATH] [--force]
+```
 
-Purpose: bootstrap a minimal usable config quickly.
+Behavior:
 
-Options:
+- writes a minimal `config.yaml` template
+- refuses to overwrite unless `--force` is passed
 
-- `--config PATH`: destination path (`config.yaml` default)
-- `--force`: overwrite existing file
+## doctor
 
-Expected output:
-
-- writes config file and prints written path
-- fails if file exists and `--force` is not provided
-
-## `doctor` mode
-
-Purpose: fast local diagnostics without running the full pipeline.
-
-Options:
-
-- `--config PATH`: config file path (`config.yaml` default)
-- `--strict`: return non-zero if any warnings are found
+```bash
+paperweight doctor [--config PATH] [--strict]
+```
 
 Checks:
 
-- config file existence
-- config parse/validation
+- config file exists
+- config parses and validates
 - triage provider key availability
-- delivery mode availability (`stdout`, `atom`, optional `email`)
+- enabled delivery adapters
 
-Expected output:
+Exit codes:
 
-- line-based status report with `OK`, `WARN`, or `FAIL`
-- non-zero exit code only on hard failures (missing/invalid config)
-
-## API key requirements
-
-- API keys are not required for all modes.
-- `init` and `doctor` work without provider keys.
-- `run` can operate without keys if triage/analyzer paths fall back to non-LLM behavior.
+- `0`: healthy (or warnings present without `--strict`)
+- `1`: hard failure, or warning in strict mode
