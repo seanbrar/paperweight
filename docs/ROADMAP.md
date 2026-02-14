@@ -1,87 +1,72 @@
 # paperweight roadmap
 
-This document outlines planned features and improvements for the paperweight project. The roadmap is organized into focused development areas to create a scalable, efficient academic paper processing system.
+This roadmap replaces the previous feature backlog.
+The focus is a useful, low-friction product in `v0.2`, not a distant `v1.0`.
 
-## Core System Enhancements
+## Product thesis
 
-### Performance & Efficiency
-- [ ] Implement asynchronous processing for paper fetching and analysis
-- [ ] Add configurable batch processing with adjustable batch sizes
-- [ ] Create memory usage tracking and optimization for large document sets
-- [ ] Implement benchmarking tools to measure and optimize performance
+paperweight should save time by doing high-signal triage on arXiv papers and
+producing a short digest users can trust.
 
-### Context Management
-- [ ] Develop intelligent document chunking for papers exceeding token limits
-- [ ] Implement hierarchical summarization for extremely long papers
-- [ ] Create a context window awareness system that optimizes token usage
-- [ ] Add semantic sectioning to prioritize important paper components
+The default experience must be:
 
-### Caching Infrastructure
-- [ ] Implement persistent caching for paper embeddings and metadata
-- [ ] Create smart cache invalidation strategies based on paper updates
-- [ ] Develop a disk-based storage system for embeddings to reduce API costs
-- [ ] Add cache statistics reporting for optimization insights
+1. zero setup beyond a config file and LLM key
+2. fast enough to run frequently
+3. deterministic, scriptable output
 
-## Module-Specific Improvements
+## Principles (DOTADIW + YAGNI)
 
-### Scraper Module
-- [ ] Enhance PDF extraction precision with specialized academic paper handling
-- [ ] Add support for extracting and processing figures and tables
-- [ ] Expand retry logic in API interactions using advanced backoff strategies
-- [ ] Improve date-based paper filtering with precise version tracking
+- Default to the simplest path that works.
+- Do not require SMTP, Postgres, or dashboards for baseline usage.
+- Keep one clear interface and one clear output model.
+- Add adapters only when they materially improve delivery.
+- Prefer deleting complexity over abstracting it.
 
-### Processor Module
-- [ ] Develop enhanced scoring algorithms for more accurate paper relevance
-- [ ] Implement sliding window analysis for sequential context processing
-- [ ] Create adaptive keyword weighting based on document section importance
-- [ ] Add citation network analysis for evaluating paper significance
+## v0.2 (MVP that is already good)
 
-### Analyzer Module
-- [ ] Expand LLM provider support with a unified interface
-- [ ] Implement streaming responses for long paper summarization
-- [ ] Create domain-specific summarization templates for different fields
-- [ ] Add comparative analysis between related papers
+### UX and interface
 
-### Notifier Module
-- [ ] Develop a modular notification system supporting multiple channels
-- [ ] Create customizable templates for notification formatting
-- [ ] Implement digest mode for batched notifications
-- [ ] Add interactive elements to notifications for user feedback
+- [x] Default delivery is deterministic `stdout` digest.
+- [x] Add Atom feed output as a secondary delivery format.
+- [ ] Add `paperweight init` for minimal config bootstrap.
+- [ ] Add `paperweight doctor` for config/env/provider checks.
 
-## Strategic Directions
+### AI and ranking
 
-### Machine Learning Integration
-- [ ] Replace keyword-based filtering with embedding similarity scoring
-- [ ] Implement personalized paper recommendations based on user interests
-- [ ] Develop citation impact prediction for emerging papers
-- [ ] Create a feedback loop to improve future recommendations
+- [ ] Make AI relevance judgment core for triage (title + abstract first).
+- [ ] Keep summarization bounded with hard input limits.
+- [ ] Produce one-line "why this matched" rationale for each paper.
 
-### Expanded Data Sources
-- [ ] Add support for multiple academic repositories (PubMed, IEEE, etc.)
-- [ ] Implement unified metadata schema across different sources
-- [ ] Create source-specific optimizations for each repository
-- [ ] Develop cross-repository deduplication
+### Performance
 
-### User Experience
-- [ ] Create a simple web interface for configuration and monitoring
-- [ ] Develop a local dashboard for visualizing paper recommendations
-- [ ] Add personalized preference learning from user interactions
-- [ ] Implement saved searches and automated monitoring
+- [ ] Stop downloading full content for all candidates by default.
+- [ ] Fetch/extract full text only for shortlisted papers.
+- [ ] Add simple local caching for fetched metadata by run.
 
-## Development Infrastructure
+### Docs
 
-### Testing & Quality
-- [ ] Expand test coverage with more integration tests
-- [ ] Develop performance regression testing
-- [ ] Create automated benchmark suites for optimization
-- [ ] Implement continuous profiling for memory and CPU usage
+- [ ] Rewrite README around "5-minute first digest".
+- [ ] Remove claims not implemented in code.
+- [ ] Document output formats and scripting examples.
 
-### Documentation
-- [ ] Expand API documentation for extensibility
-- [ ] Create visual architecture diagrams
-- [ ] Develop advanced configuration guides for specific use cases
-- [ ] Add code examples for common extension patterns
+## v0.3-v0.5 (quality and fit)
 
-We welcome contributions and suggestions from the community. If you have ideas for features or improvements, please open an issue on the [GitHub repository](https://github.com/seanbrar/paperweight/issues).
+- [ ] Tighten scoring quality using user feedback signals.
+- [ ] Improve digest rendering (grouping, rationale clarity, compact layout).
+- [ ] Add optional adapters where demand exists (email via keychain-backed auth).
+- [ ] Stabilize config schema and migration notes.
 
-For information on how to contribute to paperweight, please see the [contributing guide](docs/CONTRIBUTING.md).
+## Road to v1.0
+
+`v1.0` means stability and reliability, not a huge scope jump:
+
+- Stable CLI contract and config schema.
+- Strong test coverage on core triage flow.
+- Backward-compatible upgrades from `v0.2+`.
+- Operationally boring: predictable runtime, deterministic outputs, clear failures.
+
+## Explicit non-goals (for now)
+
+- Web app/dashboard before core CLI flow is excellent.
+- Multi-source ingestion before arXiv triage quality is strong.
+- Complex recommendation systems without a validated feedback loop.

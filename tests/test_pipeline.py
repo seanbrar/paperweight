@@ -37,7 +37,6 @@ from paperweight.storage import (
 )
 from paperweight.utils import get_package_version, hash_config
 
-
 ROOT = Path(__file__).parent.parent
 LIVE_INTEGRATION_ENV = "PAPERWEIGHT_LIVE_INTEGRATION"
 MAILPIT_HOST_ENV = "PAPERWEIGHT_MAILPIT_HOST"
@@ -107,6 +106,13 @@ def mock_main_dependencies(mocker):
     mock_get_abstracts = mocker.patch('paperweight.main.get_abstracts')
     mock_get_abstracts.return_value = ["Test summary"]
 
+    # Mock digest rendering/writing
+    mock_render_text_digest = mocker.patch('paperweight.main.render_text_digest')
+    mock_render_text_digest.return_value = "digest"
+    mock_write_output = mocker.patch('paperweight.main.write_output')
+    mock_render_atom_feed = mocker.patch('paperweight.main.render_atom_feed')
+    mock_render_atom_feed.return_value = "<feed/>"
+
     # Mock notifications
     mock_notifications = mocker.patch(
         'paperweight.main.compile_and_send_notifications'
@@ -126,6 +132,9 @@ def mock_main_dependencies(mocker):
         'get_recent_papers': mock_get_recent_papers,
         'process_papers': mock_process_papers,
         'get_abstracts': mock_get_abstracts,
+        'render_text_digest': mock_render_text_digest,
+        'write_output': mock_write_output,
+        'render_atom_feed': mock_render_atom_feed,
         'notifications': mock_notifications,
         'logger': mock_logger,
         'is_db_enabled': mock_is_db_enabled,
@@ -364,3 +373,16 @@ class TestMainErrorHandling:
         mock_main_dependencies['logger'].info.assert_any_call(
             "No new papers to process. Exiting."
         )
+
+    def test_default_delivery_writes_digest(self, mock_main_dependencies):
+        """Default mode renders and writes stdout digest."""
+        main()
+        mock_main_dependencies['render_text_digest'].assert_called_once()
+        mock_main_dependencies['write_output'].assert_called_once()
+        mock_main_dependencies['notifications'].assert_not_called()
+
+    def test_email_delivery_uses_notifier(self, mock_main_dependencies, monkeypatch):
+        """Email mode delegates to notifier adapter."""
+        monkeypatch.setattr('sys.argv', ['paperweight', '--delivery', 'email'])
+        main()
+        mock_main_dependencies['notifications'].assert_called_once()

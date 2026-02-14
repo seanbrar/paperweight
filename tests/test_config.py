@@ -20,7 +20,6 @@ from paperweight.utils import (
     override_with_env,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -169,6 +168,11 @@ class TestCheckConfig:
         valid_base_config['arxiv']['categories'] = ['cs.AI', 'math.CO', 'physics.APP']
         assert check_config(valid_base_config) is None
 
+    def test_notifier_is_optional(self, valid_base_config):
+        """Notifier section can be omitted for stdout/atom delivery."""
+        del valid_base_config['notifier']
+        assert check_config(valid_base_config) is None
+
 
 class TestInvalidCategories:
     """Tests for invalid arXiv category validation."""
@@ -230,6 +234,14 @@ class TestEmailValidation:
         del valid_base_config['notifier']['email']['password']
         with pytest.raises(ValueError, match="Missing required email field: 'password'"):
             check_config(valid_base_config)
+
+    def test_email_disabled_skips_required_fields(self, valid_base_config):
+        """Email requirements are skipped when explicitly disabled."""
+        valid_base_config['notifier'] = {
+            'type': 'email',
+            'email': {'enabled': False},
+        }
+        assert check_config(valid_base_config) is None
 
 
 class TestLoggingValidation:

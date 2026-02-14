@@ -11,12 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database support with PostgreSQL integration for paper storage
 - Local arXiv mirror for offline integration testing
 - Comprehensive test suite with integration and unit tests
+- Deterministic text digest rendering for stdout/file workflows
+- Atom feed rendering for secondary delivery workflows
 
 ### Changed
 - Migrated project to uv for dependency management
 - Refactored scraper to use the official `arxiv` Python library
 - Restructured test suite with separate integration and unit test directories
 - Updated core logic and notifier components
+- CLI delivery modes now support `stdout` (default), `atom`, and optional `email`
+- Configuration validation now treats notifier/email as optional unless email delivery is used
+- Roadmap and docs rewritten around a simplified v0.2 direction
 
 ### Fixed
 - Improved error handling throughout the codebase

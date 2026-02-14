@@ -15,7 +15,12 @@ import yaml
 from paperweight.analyzer import get_abstracts
 from paperweight.db import DatabaseConnectionError, connect_db, is_db_enabled
 from paperweight.logging_config import setup_logging
-from paperweight.notifier import compile_and_send_notifications
+from paperweight.notifier import (
+    compile_and_send_notifications,
+    render_atom_feed,
+    render_text_digest,
+    write_output,
+)
 from paperweight.processor import process_papers
 from paperweight.scraper import get_recent_papers
 from paperweight.storage import (
@@ -193,6 +198,36 @@ def _handle_error(error, error_type):
     return str(error)
 
 
+def _deliver_output(processed_papers, config, args):
+    """Deliver processed papers via the requested adapter."""
+    if args.delivery == "stdout":
+        digest = render_text_digest(processed_papers, sort_order=args.sort_order)
+        write_output(digest, args.output)
+        return
+
+    if args.delivery == "atom":
+        feed_config = config.get("feed", {})
+        feed_xml = render_atom_feed(
+            processed_papers,
+            sort_order=args.sort_order,
+            feed_title=feed_config.get("title", "paperweight"),
+            feed_id=feed_config.get("id", "https://github.com/seanbrar/paperweight"),
+            feed_link=feed_config.get("link", "https://github.com/seanbrar/paperweight"),
+        )
+        write_output(feed_xml, args.output)
+        return
+
+    notifier_config = config.get("notifier")
+    if not notifier_config:
+        raise ValueError("Email delivery requested but notifier config is missing.")
+
+    notification_sent = compile_and_send_notifications(processed_papers, notifier_config)
+    if notification_sent:
+        logger.info("Notifications compiled and sent successfully")
+    else:
+        logger.warning("Failed to send notifications")
+
+
 def main():
     """Main entry point for the paperweight application.
 
@@ -206,6 +241,23 @@ def main():
         "--force-refresh",
         action="store_true",
         help="Force refresh papers regardless of last processed date",
+    )
+    parser.add_argument(
+        "--delivery",
+        choices=["stdout", "atom", "email"],
+        default="stdout",
+        help="Delivery target for results (default: stdout)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        help="Optional output file path for stdout/atom delivery",
+    )
+    parser.add_argument(
+        "--sort-order",
+        choices=["relevance", "alphabetical", "publication_time"],
+        default="relevance",
+        help="Sort order for digest output",
     )
     args = parser.parse_args()
 
@@ -229,13 +281,7 @@ def main():
             _persist_results(config, run_id, processed_papers, paper_id_map)
 
         if processed_papers:
-            notification_sent = compile_and_send_notifications(
-                processed_papers, config["notifier"]
-            )
-            if notification_sent:
-                logger.info("Notifications compiled and sent successfully")
-            else:
-                logger.warning("Failed to send notifications")
+            _deliver_output(processed_papers, config, args)
 
         run_status = "success"
     except (

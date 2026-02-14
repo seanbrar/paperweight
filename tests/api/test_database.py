@@ -13,7 +13,6 @@ from datetime import date
 
 import pytest
 
-
 DATABASE_URL_ENV = "PAPERWEIGHT_TEST_DATABASE_URL"
 
 

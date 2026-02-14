@@ -1,16 +1,114 @@
-"""Module for sending email notifications about processed papers.
+"""Notification and digest rendering helpers.
 
-This module handles the creation and sending of email notifications about relevant papers
-that have been processed. It includes functionality for composing email content and
-sending emails through SMTP servers.
+paperweight's default delivery is a deterministic stdout digest. Atom feed and
+email delivery are optional adapters.
 """
 
 import logging
 import smtplib
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
+from typing import Any, Dict, List
+from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
+
+
+def _sort_papers(papers: List[Dict[str, Any]], sort_order: str) -> List[Dict[str, Any]]:
+    if sort_order == "alphabetical":
+        return sorted(papers, key=lambda x: x.get("title", "").lower())
+    if sort_order == "publication_time":
+        return sorted(papers, key=lambda x: x.get("date"), reverse=True)
+    return list(papers)
+
+
+def _format_paper_date(paper: Dict[str, Any]) -> str:
+    value = paper.get("date")
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value or "")
+
+
+def render_text_digest(
+    papers: List[Dict[str, Any]],
+    *,
+    sort_order: str = "relevance",
+    heading: str = "paperweight digest",
+) -> str:
+    """Render a deterministic plain-text digest."""
+    if not papers:
+        return "paperweight digest\n\nNo matching papers."
+
+    ordered = _sort_papers(papers, sort_order)
+    lines = [heading, ""]
+
+    for idx, paper in enumerate(ordered, start=1):
+        score = paper.get("relevance_score", 0.0)
+        lines.append(f"{idx}. {paper.get('title', 'Untitled')}")
+        lines.append(f"   Date: {_format_paper_date(paper)}")
+        lines.append(f"   Score: {score:.2f}")
+        lines.append(f"   Link: {paper.get('link', '')}")
+        lines.append(f"   Summary: {(paper.get('summary') or '').strip()}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_atom_feed(
+    papers: List[Dict[str, Any]],
+    *,
+    sort_order: str = "relevance",
+    feed_title: str = "paperweight",
+    feed_id: str = "https://github.com/seanbrar/paperweight",
+    feed_link: str = "https://github.com/seanbrar/paperweight",
+) -> str:
+    """Render an Atom feed from processed papers."""
+    ns = "http://www.w3.org/2005/Atom"
+    ET.register_namespace("", ns)
+    feed = ET.Element(f"{{{ns}}}feed")
+
+    ET.SubElement(feed, f"{{{ns}}}title").text = feed_title
+    ET.SubElement(feed, f"{{{ns}}}id").text = feed_id
+    ET.SubElement(feed, f"{{{ns}}}link", {"href": feed_link, "rel": "self"})
+    ET.SubElement(feed, f"{{{ns}}}updated").text = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    ordered = _sort_papers(papers, sort_order)
+    for paper in ordered:
+        entry = ET.SubElement(feed, f"{{{ns}}}entry")
+        link = paper.get("link", "")
+        title = paper.get("title", "Untitled")
+        summary = (paper.get("summary") or "").strip()
+        score = paper.get("relevance_score", 0.0)
+        date_text = _format_paper_date(paper)
+        updated = f"{date_text}T00:00:00Z" if len(date_text) == 10 else date_text
+
+        ET.SubElement(entry, f"{{{ns}}}id").text = link or title
+        ET.SubElement(entry, f"{{{ns}}}title").text = title
+        ET.SubElement(entry, f"{{{ns}}}updated").text = updated
+        if link:
+            ET.SubElement(entry, f"{{{ns}}}link", {"href": link, "rel": "alternate"})
+        ET.SubElement(entry, f"{{{ns}}}summary").text = summary
+        ET.SubElement(entry, f"{{{ns}}}content", {"type": "text"}).text = (
+            f"Score: {score:.2f}\nLink: {link}\nSummary: {summary}"
+        )
+
+    xml_bytes = ET.tostring(feed, encoding="utf-8", xml_declaration=True)
+    return xml_bytes.decode("utf-8")
+
+
+def write_output(content: str, output_path: str | None = None) -> None:
+    """Write digest/feed content to file or stdout."""
+    if output_path:
+        target = Path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        logger.info("Wrote output to %s", target)
+    else:
+        print(content, end="")
 
 
 def send_email_notification(subject, body, config):
@@ -74,21 +172,8 @@ def compile_and_send_notifications(papers, config):
         return False
 
     sort_order = config.get("email", {}).get("sort_order", "relevance")
-
-    if sort_order == "alphabetical":
-        papers = sorted(papers, key=lambda x: x["title"].lower())
-    elif sort_order == "publication_time":
-        papers = sorted(papers, key=lambda x: x["date"], reverse=True)
-    # For 'relevance' or any other value, we keep the existing order (already sorted by relevance)
-
+    papers = _sort_papers(papers, sort_order)
     subject = "New Papers from ArXiv"
-    body = "Here are the latest papers:\n\n"
-    for paper in papers:
-        body += f"Title: {paper['title']}\n"
-        body += f"Date: {paper['date']}\n"
-        body += f"Summary: {paper['summary']}\n"
-        body += f"Link: {paper['link']}\n"
-        body += f"Relevance Score: {paper['relevance_score']:.2f}\n\n"
-
+    body = render_text_digest(papers, sort_order=sort_order, heading="New Papers from ArXiv")
     success = send_email_notification(subject, body, config)
     return success
