@@ -12,28 +12,31 @@ from paperweight.analyzer import get_abstracts, summarize_paper
 class TestSummarizePaper:
     """Tests for paper summarization with LLM providers."""
 
-    @pytest.mark.parametrize("llm_provider, api_key, expected_result", [
-        ('openai', 'fake_api_key', "This is a summary of the paper."),
-        ('openai', None, "This is the abstract."),
-        ('invalid_provider', 'fake_api_key', "This is the abstract."),
-    ])
-    def test_summarize_with_fallback(self, llm_provider, api_key, expected_result, mocker):
+    @pytest.mark.parametrize(
+        "llm_provider, api_key, expected_result",
+        [
+            ("openai", "fake_api_key", "This is a summary of the paper."),
+            ("openai", None, "This is the abstract."),
+            ("invalid_provider", "fake_api_key", "This is the abstract."),
+        ],
+    )
+    def test_summarize_with_fallback(
+        self, llm_provider, api_key, expected_result, mocker
+    ):
         """Summarization falls back to abstract when LLM unavailable."""
-        mock_llm = mocker.Mock()
-        mock_llm.generate_response.return_value = "This is a summary of the paper."
-        mocker.patch('paperweight.analyzer.LLM.create', return_value=mock_llm)
+        # Mock Pollux's async run() function
+        mock_result = {"answers": ["This is a summary of the paper."], "status": "ok"}
+        mocker.patch("paperweight.analyzer.run", return_value=mock_result)
 
         paper = {
-            'title': 'Test Paper',
-            'abstract': 'This is the abstract.',
-            'content': 'This is the full content of the paper.'
+            "title": "Test Paper",
+            "abstract": "This is the abstract.",
+            "content": "This is the full content of the paper.",
         }
         config = {
-            'analyzer': {
-                'type': 'summary',
-                'llm_provider': llm_provider,
-                'api_key': api_key
-            }
+            "type": "summary",
+            "llm_provider": llm_provider,
+            "api_key": api_key,
         }
 
         result = summarize_paper(paper, config)
@@ -45,6 +48,6 @@ class TestGetAbstracts:
 
     def test_invalid_analysis_type_raises(self):
         """Unknown analysis type raises ValueError."""
-        config = {'type': 'invalid_type'}
+        config = {"type": "invalid_type"}
         with pytest.raises(ValueError, match="Unknown analysis type: invalid_type"):
-            get_abstracts([{'abstract': 'Test abstract'}], config)
+            get_abstracts([{"abstract": "Test abstract"}], config)

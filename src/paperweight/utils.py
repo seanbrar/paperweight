@@ -44,33 +44,41 @@ def expand_env_vars(config):
         return config
 
 
-def override_with_env(config):
+def override_with_env(config, *, _path=()):
     """Override configuration values with environment variables.
 
-    Args:
-        config: Configuration dictionary to override.
+    Environment variables use the prefix ``PAPERWEIGHT_`` and uppercase keys.
 
-    Returns:
-        Configuration dictionary with values overridden by environment variables.
+    Canonical nested form is fully-qualified:
+    ``PAPERWEIGHT_ARXIV_MAX_RESULTS=50``.
 
-    Environment variables should be prefixed with 'PAPERWEIGHT_' and use uppercase.
-    Nested configuration keys are joined with underscores.
+    Backwards-compat: also accept the legacy leaf-only form (e.g.
+    ``PAPERWEIGHT_MAX_RESULTS``). Fully-qualified wins if both are present.
     """
+
+    def _coerce(env_value: str, current_value):
+        if isinstance(current_value, bool):
+            return env_value.lower() in ("true", "1", "yes")
+        if isinstance(current_value, int):
+            return int(env_value)
+        if isinstance(current_value, float):
+            return float(env_value)
+        return env_value
+
     env_prefix = "PAPERWEIGHT_"
     for key, value in config.items():
-        env_var = f"{env_prefix}{key.upper()}"
         if isinstance(value, dict):
-            config[key] = override_with_env(value)
-        elif env_var in os.environ:
-            env_value = os.environ[env_var]
-            if isinstance(value, bool):
-                config[key] = env_value.lower() in ("true", "1", "yes")
-            elif isinstance(value, int):
-                config[key] = int(env_value)
-            elif isinstance(value, float):
-                config[key] = float(env_value)
-            else:
-                config[key] = env_value
+            config[key] = override_with_env(value, _path=_path + (key,))
+            continue
+
+        qualified = f"{env_prefix}{'_'.join([p.upper() for p in (_path + (key,))])}"
+        legacy_leaf = f"{env_prefix}{key.upper()}"
+
+        if qualified in os.environ:
+            config[key] = _coerce(os.environ[qualified], value)
+        elif legacy_leaf in os.environ:
+            config[key] = _coerce(os.environ[legacy_leaf], value)
+
     return config
 
 
@@ -156,8 +164,9 @@ def check_config(config):
         _check_required_sections(config)
         _check_arxiv_section(config["arxiv"])
         _check_analyzer_section(config["analyzer"])
-        _check_notifier_section(config["notifier"])
         _check_logging_section(config["logging"])
+        if "notifier" in config:
+            _check_notifier_section(config["notifier"])
         if "db" in config and config["db"].get("enabled"):
             _check_db_section(config["db"])
         if "storage" in config:
@@ -175,7 +184,8 @@ def _check_required_sections(config):
     Raises:
         ValueError: If any required section is missing.
     """
-    required_sections = ["arxiv", "processor", "analyzer", "notifier", "logging"]
+    # Notifier is optional (stdout-only runs should not require SMTP config).
+    required_sections = ["arxiv", "processor", "analyzer", "logging"]
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Missing required section: '{section}'")
@@ -236,6 +246,25 @@ def _check_notifier_section(notifier):
     Raises:
         ValueError: If notifier configuration is invalid.
     """
+    # Support stdout-only configs: notifier can be omitted or empty.
+    if not notifier:
+        return
+
+    notifier_type = (notifier.get("type") or "").strip().lower()
+    email_cfg = notifier.get("email") or {}
+    email_enabled = email_cfg.get("enabled")
+
+    # Backwards-compat: older configs had only notifier.email.* and were implicitly enabled.
+    if email_enabled is None and "email" in notifier:
+        email_enabled = True
+
+    # Non-email notifiers have no SMTP requirements.
+    if notifier_type and notifier_type != "email":
+        return
+
+    if not email_enabled:
+        return
+
     if "email" not in notifier:
         raise ValueError("Missing required subsection: 'email' in 'notifier'")
     required_email_fields = ["to", "from", "smtp_server", "smtp_port"]
