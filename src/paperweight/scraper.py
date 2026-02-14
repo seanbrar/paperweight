@@ -6,18 +6,18 @@ API interactions and various methods for processing paper content.
 """
 
 import gzip
+import hashlib
 import io
 import logging
 import os
 import tarfile
 import time
-import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
+import arxiv
 import requests
 from pypdf import PdfReader
-from requests.exceptions import HTTPError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -25,20 +25,17 @@ from tenacity import (
     wait_exponential,
 )
 
+from paperweight.db import DatabaseConnectionError, connect_db
+from paperweight.storage import get_last_successful_run_date
 from paperweight.utils import (
     get_last_processed_date,
-    load_config,
     save_last_processed_date,
+    split_arxiv_id,
 )
 
 logger = logging.getLogger(__name__)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
-)
 def fetch_arxiv_papers(
     category: str, start_date: date, max_results: Optional[int] = None
 ) -> List[Dict[str, Any]]:
@@ -57,76 +54,58 @@ def fetch_arxiv_papers(
         requests.Timeout: If the request times out.
     """
     logger.debug(f"Fetching arXiv papers for category '{category}' since {start_date}")
-    base_url = "http://export.arxiv.org/api/query?"
+
+    # Construct the query
     query = f"cat:{category}"
-    params: Dict[str, Union[str, int]] = {
-        "search_query": query,
-        "start": 0,
-        "sortBy": "submittedDate",
-        "sortOrder": "descending",
-    }
-    if max_results is not None and max_results > 0:
-        params["max_results"] = max_results
 
-    try:
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()
-    except HTTPError as http_err:
-        if response.status_code == 400 and "Invalid field: cat" in response.text:
-            logger.error(
-                f"Invalid arXiv category: {category}. Please check your configuration."
-            )
-            raise ValueError(
-                f"Invalid arXiv category: {category}. Please check your configuration."
-            ) from http_err
-        else:
-            logger.error(f"HTTP error occurred: {http_err}")
-            raise
+    # Configure the client
+    client = arxiv.Client(
+        page_size=100,
+        delay_seconds=3.0,
+        num_retries=3
+    )
 
-    root = ET.fromstring(response.content)
+    search = arxiv.Search(
+        query=query,
+        max_results=max_results,
+        sort_by=arxiv.SortCriterion.SubmittedDate,
+        sort_order=arxiv.SortOrder.Descending,
+    )
 
     papers = []
-    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
-        title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
-        link_elem = entry.find("{http://www.w3.org/2005/Atom}id")
-        published_elem = entry.find("{http://www.w3.org/2005/Atom}published")
-        summary_elem = entry.find("{http://www.w3.org/2005/Atom}summary")
 
-        if (
-            title_elem is None
-            or link_elem is None
-            or published_elem is None
-            or summary_elem is None
-        ):
-            logger.warning("Skipping entry due to missing required elements")
-            continue
+    try:
+        # Iterate through the results
+        for result in client.results(search):
+            submitted_date = result.published.date()
 
-        title = title_elem.text.strip() if title_elem.text else ""
-        link = link_elem.text.strip() if link_elem.text else ""
-        submitted = published_elem.text.strip() if published_elem.text else ""
-        abstract = summary_elem.text.strip() if summary_elem.text else ""
+            logger.debug(f"Paper '{result.title}' submitted on {submitted_date}")
 
-        try:
-            submitted_date = datetime.strptime(submitted, "%Y-%m-%dT%H:%M:%SZ").date()
-        except ValueError:
-            logger.warning(f"Invalid date format for paper: {title}")
-            continue
+            if submitted_date < start_date:
+                logger.debug(
+                    f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+                )
+                break
 
-        logger.debug(f"Paper '{title}' submitted on {submitted_date}")
-
-        if submitted_date < start_date:
-            logger.debug(
-                f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+            papers.append(
+                {
+                    "title": result.title,
+                    "link": result.entry_id,
+                    "date": submitted_date,
+                    "abstract": result.summary,
+                }
             )
-            break
 
-        papers.append(
-            {"title": title, "link": link, "date": submitted_date, "abstract": abstract}
-        )
+            # Safety break if max_results is set multiple times or if the generator doesn't stop
+            if max_results is not None and max_results > 0 and len(papers) >= max_results:
+                break
 
-        if max_results is not None and max_results > 0 and len(papers) >= max_results:
-            logger.debug(f"Reached max_results limit of {max_results}")
-            break
+    except Exception as e:
+         # Map arxiv errors or other unexpected errors
+         logger.error(f"Error fetching papers: {e}")
+         # We might want to re-raise or handle gracefully depending on the exact error
+         # For now, consistent with previous behavior, let's allow tenacity or caller to handle
+         raise
 
     logger.info(
         f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}"
@@ -134,7 +113,7 @@ def fetch_arxiv_papers(
     return papers
 
 
-def fetch_recent_papers(start_days=1):
+def fetch_recent_papers(config, start_days=1):
     """Fetch papers published within the last specified number of days.
 
     Args:
@@ -143,7 +122,6 @@ def fetch_recent_papers(start_days=1):
     Returns:
         List of dictionaries containing paper metadata.
     """
-    config = load_config()
     categories = config["arxiv"]["categories"]
     max_results = config["arxiv"].get("max_results", 0)  # Default to 0 if not set
     end_date = datetime.now().date()
@@ -326,16 +304,68 @@ def fetch_paper_contents(paper_ids):
     return contents
 
 
-def get_recent_papers(force_refresh=False):
+def _hydrate_papers_with_content(papers, config, db_enabled):
+    """Attach extracted content/artifacts to paper metadata."""
+    if not papers:
+        return []
+
+    paper_ids = [paper["link"].split("/abs/")[-1] for paper in papers]
+    contents = fetch_paper_contents(paper_ids)
+
+    papers_with_content = []
+    storage_base = config.get("storage", {}).get("base_dir", "data/artifacts")
+    for paper, (paper_id, content, method) in zip(papers, contents):
+        if content:
+            logger.debug(f"Extracting text for paper ID: {paper_id}")
+            text = extract_text_from_source(content, method)
+
+            artifacts = []
+            if db_enabled:
+                artifacts = _store_artifacts(paper_id, method, content, text, storage_base)
+
+            paper_with_content = dict(paper)
+            paper_with_content.update(
+                {
+                    "id": paper_id,
+                    "content": text,
+                    "content_type": method,
+                    "artifacts": artifacts,
+                }
+            )
+            papers_with_content.append(paper_with_content)
+
+    logger.info("Hydrated %s/%s papers with full content", len(papers_with_content), len(papers))
+    return papers_with_content
+
+
+def hydrate_papers_with_content(papers, config):
+    """Public helper to fetch/extract full content for an existing shortlist."""
+    db_enabled = config.get("db", {}).get("enabled", False)
+    return _hydrate_papers_with_content(papers, config, db_enabled)
+
+
+def get_recent_papers(config, force_refresh=False, include_content=True):
     """Get recent papers, either from cache or by fetching new ones.
 
     Args:
         force_refresh: If True, ignore cache and fetch new papers.
+        include_content: If True, fetch and extract full paper content.
 
     Returns:
         List of dictionaries containing paper metadata.
     """
-    last_processed_date = get_last_processed_date()
+    db_enabled = config.get("db", {}).get("enabled", False)
+    used_local_watermark = not db_enabled
+    if db_enabled:
+        try:
+            with connect_db(config["db"]) as conn:
+                last_processed_date = get_last_successful_run_date(conn)
+        except Exception as e:
+            raise DatabaseConnectionError(
+                "Database enabled but unreachable. Check host, port, credentials, and sslmode."
+            ) from e
+    else:
+        last_processed_date = get_last_processed_date()
     logger.info(f"Last processed date: {last_processed_date}")
     current_date = datetime.now().date()
     logger.info(f"Current date: {current_date}")
@@ -357,37 +387,128 @@ def get_recent_papers(force_refresh=False):
             )
 
     logger.info(f"Fetching papers for the last {days} days")
-    recent_papers = fetch_recent_papers(days)
+    recent_papers = fetch_recent_papers(config, days)
     logger.info(f"Fetched {len(recent_papers)} recent papers")
-    paper_ids = [paper["link"].split("/abs/")[-1] for paper in recent_papers]
 
-    contents = fetch_paper_contents(paper_ids)
-
-    papers_with_content = []
-    for paper, (paper_id, content, method) in zip(recent_papers, contents):
-        if content:
-            logger.debug(f"Extracting text for paper ID: {paper_id}")
-            text = extract_text_from_source(content, method)
-
-            papers_with_content.append(
+    papers_result = recent_papers
+    if include_content:
+        papers_result = _hydrate_papers_with_content(recent_papers, config, db_enabled)
+    else:
+        papers_result = []
+        for paper in recent_papers:
+            paper_id = paper["link"].split("/abs/")[-1]
+            paper_without_content = dict(paper)
+            paper_without_content.update(
                 {
                     "id": paper_id,
-                    "title": paper["title"],
-                    "link": paper["link"],
-                    "date": paper["date"],
-                    "abstract": paper["abstract"],
-                    "content": text,
-                    "content_type": method,
+                    "content": "",
+                    "content_type": None,
+                    "artifacts": [],
                 }
             )
+            papers_result.append(paper_without_content)
 
-    if papers_with_content:
+    if recent_papers and used_local_watermark:
         save_last_processed_date(current_date)
         logger.info(
-            f"Processed {len(papers_with_content)} papers. Last processed date updated to {current_date}"
+            "Processed fetch window (%s papers). Last processed date updated to %s",
+            len(recent_papers),
+            current_date,
         )
     else:
         logger.info("No new papers found.")
 
-    logger.info(f"Returning {len(papers_with_content)} papers with content")
-    return papers_with_content
+    logger.info(
+        "Returning %s papers (%s content)",
+        len(papers_result),
+        "with" if include_content else "without",
+    )
+    return papers_result
+
+
+def _store_artifacts(paper_id, method, content, text, storage_base):
+    """Store paper artifacts (source and extracted text) to disk.
+
+    Args:
+        paper_id: arXiv paper identifier.
+        method: Content retrieval method ('pdf' or 'source').
+        content: Raw binary content of the paper.
+        text: Extracted text content.
+        storage_base: Base directory for artifact storage.
+
+    Returns:
+        List of artifact metadata dictionaries with type, uri, checksum, and byte_size.
+    """
+    arxiv_id, arxiv_version = split_arxiv_id(paper_id)
+    artifacts = []
+    safe_id = arxiv_id.replace("/", "_")
+    paper_dir = os.path.join(storage_base, f"{safe_id}_{arxiv_version}")
+
+    try:
+        os.makedirs(paper_dir, exist_ok=True)
+    except OSError as e:
+        logger.error("Failed to create artifact directory %s: %s", paper_dir, e)
+        return artifacts
+
+    if content:
+        raw_ext = "pdf" if method == "pdf" else "bin"
+        raw_path = os.path.join(paper_dir, f"source.{raw_ext}")
+        try:
+            _write_bytes(raw_path, content)
+            artifacts.append(
+                _artifact_record("source" if method == "source" else "pdf", raw_path, content)
+            )
+        except OSError as e:
+            logger.error("Failed to write source artifact %s: %s", raw_path, e)
+
+    if text:
+        text_path = os.path.join(paper_dir, "extracted.txt")
+        try:
+            _write_text(text_path, text)
+            artifacts.append(_artifact_record("text", text_path, text.encode("utf-8")))
+        except OSError as e:
+            logger.error("Failed to write text artifact %s: %s", text_path, e)
+
+    return artifacts
+
+
+def _artifact_record(artifact_type, path, payload):
+    """Create an artifact metadata record.
+
+    Args:
+        artifact_type: Type of artifact ('pdf', 'source', or 'text').
+        path: File path where the artifact is stored.
+        payload: Binary content of the artifact.
+
+    Returns:
+        Dictionary with artifact metadata (type, uri, checksum, byte_size).
+    """
+    checksum = hashlib.sha256(payload).hexdigest()
+    return {
+        "type": artifact_type,
+        "uri": path,
+        "checksum": checksum,
+        "byte_size": len(payload),
+    }
+
+
+def _write_bytes(path, payload):
+    """Write binary data to a file.
+
+    Args:
+        path: File path to write to.
+        payload: Binary data to write.
+    """
+    with open(path, "wb") as handle:
+        handle.write(payload)
+
+
+def _write_text(path, text):
+    """Write text data to a file with UTF-8 encoding.
+
+    Args:
+        path: File path to write to.
+        text: Text content to write.
+    """
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)

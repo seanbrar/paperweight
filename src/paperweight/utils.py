@@ -6,16 +6,21 @@ functions for loading and validating configuration, expanding environment variab
 and managing the last processed date for paper fetching.
 """
 
+import hashlib
+import json
 import logging
 import os
 import re
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
 
 import tiktoken
 import yaml
 from dotenv import load_dotenv
 
 LAST_PROCESSED_DATE_FILE = "last_processed_date.txt"
+DEFAULT_ARXIV_VERSION = "v0"
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +44,41 @@ def expand_env_vars(config):
         return config
 
 
-def override_with_env(config):
+def override_with_env(config, *, _path=()):
     """Override configuration values with environment variables.
 
-    Args:
-        config: Configuration dictionary to override.
+    Environment variables use the prefix ``PAPERWEIGHT_`` and uppercase keys.
 
-    Returns:
-        Configuration dictionary with values overridden by environment variables.
+    Canonical nested form is fully-qualified:
+    ``PAPERWEIGHT_ARXIV_MAX_RESULTS=50``.
 
-    Environment variables should be prefixed with 'PAPERWEIGHT_' and use uppercase.
-    Nested configuration keys are joined with underscores.
+    Backwards-compat: also accept the legacy leaf-only form (e.g.
+    ``PAPERWEIGHT_MAX_RESULTS``). Fully-qualified wins if both are present.
     """
+
+    def _coerce(env_value: str, current_value):
+        if isinstance(current_value, bool):
+            return env_value.lower() in ("true", "1", "yes")
+        if isinstance(current_value, int):
+            return int(env_value)
+        if isinstance(current_value, float):
+            return float(env_value)
+        return env_value
+
     env_prefix = "PAPERWEIGHT_"
     for key, value in config.items():
-        env_var = f"{env_prefix}{key.upper()}"
         if isinstance(value, dict):
-            config[key] = override_with_env(value)
-        elif env_var in os.environ:
-            env_value = os.environ[env_var]
-            if isinstance(value, bool):
-                config[key] = env_value.lower() in ("true", "1", "yes")
-            elif isinstance(value, int):
-                config[key] = int(env_value)
-            elif isinstance(value, float):
-                config[key] = float(env_value)
-            else:
-                config[key] = env_value
+            config[key] = override_with_env(value, _path=_path + (key,))
+            continue
+
+        qualified = f"{env_prefix}{'_'.join([p.upper() for p in (_path + (key,))])}"
+        legacy_leaf = f"{env_prefix}{key.upper()}"
+
+        if qualified in os.environ:
+            config[key] = _coerce(os.environ[qualified], value)
+        elif legacy_leaf in os.environ:
+            config[key] = _coerce(os.environ[legacy_leaf], value)
+
     return config
 
 
@@ -151,8 +164,13 @@ def check_config(config):
         _check_required_sections(config)
         _check_arxiv_section(config["arxiv"])
         _check_analyzer_section(config["analyzer"])
-        _check_notifier_section(config["notifier"])
         _check_logging_section(config["logging"])
+        if "notifier" in config:
+            _check_notifier_section(config["notifier"])
+        if "db" in config and config["db"].get("enabled"):
+            _check_db_section(config["db"])
+        if "storage" in config:
+            _check_storage_section(config["storage"])
     except KeyError as e:
         raise ValueError(f"Missing required section or key: {e}")
 
@@ -166,7 +184,8 @@ def _check_required_sections(config):
     Raises:
         ValueError: If any required section is missing.
     """
-    required_sections = ["arxiv", "processor", "analyzer", "notifier", "logging"]
+    # Notifier is optional (stdout-only runs should not require SMTP config).
+    required_sections = ["arxiv", "processor", "analyzer", "logging"]
     for section in required_sections:
         if section not in config:
             raise ValueError(f"Missing required section: '{section}'")
@@ -227,12 +246,34 @@ def _check_notifier_section(notifier):
     Raises:
         ValueError: If notifier configuration is invalid.
     """
+    # Support stdout-only configs: notifier can be omitted or empty.
+    if not notifier:
+        return
+
+    notifier_type = (notifier.get("type") or "").strip().lower()
+    email_cfg = notifier.get("email") or {}
+    email_enabled = email_cfg.get("enabled")
+
+    # Backwards-compat: older configs had only notifier.email.* and were implicitly enabled.
+    if email_enabled is None and "email" in notifier:
+        email_enabled = True
+
+    # Non-email notifiers have no SMTP requirements.
+    if notifier_type and notifier_type != "email":
+        return
+
+    if not email_enabled:
+        return
+
     if "email" not in notifier:
         raise ValueError("Missing required subsection: 'email' in 'notifier'")
-    required_email_fields = ["to", "from", "password", "smtp_server", "smtp_port"]
+    required_email_fields = ["to", "from", "smtp_server", "smtp_port"]
     for field in required_email_fields:
         if field not in notifier["email"]:
             raise ValueError(f"Missing required email field: '{field}'")
+    use_auth = notifier["email"].get("use_auth", True)
+    if use_auth and not notifier["email"].get("password"):
+        raise ValueError("Missing required email field: 'password'")
 
 
 def _check_logging_section(logging):
@@ -247,6 +288,36 @@ def _check_logging_section(logging):
     valid_logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
     if logging.get("level") not in valid_logging_levels:
         raise ValueError(f"Invalid logging level: '{logging.get('level')}'")
+
+
+def _check_db_section(db):
+    """Validate the database section of the configuration.
+
+    Args:
+        db: Database configuration dictionary.
+
+    Raises:
+        ValueError: If database configuration is invalid.
+    """
+    required_fields = ["host", "port", "database", "user", "password", "sslmode"]
+    for field in required_fields:
+        if field not in db:
+            raise ValueError(f"Missing required db field: '{field}'")
+    try:
+        int(db["port"])
+    except (ValueError, TypeError) as e:
+        raise ValueError("'port' in 'db' section must be a valid integer") from e
+    valid_sslmodes = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+    if db["sslmode"] not in valid_sslmodes:
+        raise ValueError(
+            f"Invalid sslmode '{db['sslmode']}'. Must be one of: {', '.join(sorted(valid_sslmodes))}"
+        )
+
+
+def _check_storage_section(storage):
+    """Validate the storage section of the configuration."""
+    if "base_dir" not in storage:
+        raise ValueError("Missing required storage field: 'base_dir'")
 
 
 def is_valid_arxiv_category(category):
@@ -304,3 +375,77 @@ def count_tokens(text):
     """
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     return len(encoding.encode(text, allowed_special={"<|endoftext|>"}))
+
+
+def hash_config(config):
+    """Create a stable hash of configuration values with secrets removed.
+
+    Args:
+        config: Configuration dictionary.
+
+    Returns:
+        Hex-encoded SHA-256 hash.
+    """
+    sanitized = _redact_config(config)
+    payload = json.dumps(sanitized, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _redact_config(value):
+    """Remove sensitive keys before hashing configuration data."""
+    if isinstance(value, dict):
+        redacted = {}
+        for key, val in value.items():
+            if _is_sensitive_key(key):
+                continue
+            redacted[key] = _redact_config(val)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_config(item) for item in value]
+    return value
+
+
+def _is_sensitive_key(key):
+    key_lower = key.lower()
+    sensitive_substrings = ("password", "api_key", "apikey", "secret")
+    return any(s in key_lower for s in sensitive_substrings)
+
+
+def get_package_version():
+    """Get the installed version of the paperweight package.
+
+    Returns:
+        Version string, or 'unknown' if the package is not installed.
+    """
+    try:
+        return pkg_version("paperweight")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def split_arxiv_id(raw_id):
+    """Parse an arXiv identifier into base ID and version components.
+
+    Handles both new-style (YYMM.NNNNN) and legacy (archive/NNNNNNN) formats,
+    as well as full URLs.
+
+    Args:
+        raw_id: Raw arXiv ID string, possibly including URL prefix or version suffix.
+
+    Returns:
+        Tuple of (arxiv_id, version) where version defaults to DEFAULT_ARXIV_VERSION
+        if not specified.
+    """
+    raw = (raw_id or "").strip()
+    if "/abs/" in raw:
+        raw = raw.split("/abs/")[-1]
+    raw = raw.replace("http://arxiv.org/abs/", "").replace(
+        "https://arxiv.org/abs/", ""
+    )
+    new_style = re.match(r"^(?P<id>\d{4}\.\d{4,5})(?P<version>v\d+)?$", raw)
+    if new_style:
+        return new_style.group("id"), new_style.group("version") or DEFAULT_ARXIV_VERSION
+    legacy_style = re.match(r"^(?P<id>[a-z\-]+/\d{7})(?P<version>v\d+)?$", raw)
+    if legacy_style:
+        return legacy_style.group("id"), legacy_style.group("version") or DEFAULT_ARXIV_VERSION
+    return raw, DEFAULT_ARXIV_VERSION

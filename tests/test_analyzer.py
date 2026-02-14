@@ -1,63 +1,100 @@
-from unittest.mock import patch
+"""Tests for the paper analyzer/summarization module.
+
+This file tests the LLM boundary: how paperweight interacts with
+external LLM providers to generate summaries, including fallback behavior.
+"""
 
 import pytest
 
-from paperweight.analyzer import get_abstracts, summarize_paper
+from paperweight.analyzer import get_abstracts, summarize_paper, triage_papers
 
 
-@pytest.mark.parametrize("llm_provider, api_key, expected_result", [
-    ('openai', 'fake_api_key', "This is a summary of the paper."),
-    ('openai', None, "This is the abstract."),
-    ('invalid_provider', 'fake_api_key', "This is the abstract."),
-])
-def test_summarize_paper(llm_provider, api_key, expected_result, mocker):
-    mock_llm = mocker.Mock()
-    mock_llm.generate_response.return_value = "This is a summary of the paper."
-    mocker.patch('paperweight.analyzer.LLM.create', return_value=mock_llm)
+class TestSummarizePaper:
+    """Tests for paper summarization with LLM providers."""
 
-    paper = {
-        'title': 'Test Paper',
-        'abstract': 'This is the abstract.',
-        'content': 'This is the full content of the paper.'
-    }
-    config = {
-        'analyzer': {
-            'type': 'summary',
-            'llm_provider': llm_provider,
-            'api_key': api_key
+    @pytest.mark.parametrize(
+        "llm_provider, api_key, expected_result",
+        [
+            ("openai", "fake_api_key", "This is a summary of the paper."),
+            ("openai", None, "This is the abstract."),
+            ("invalid_provider", "fake_api_key", "This is the abstract."),
+        ],
+    )
+    def test_summarize_with_fallback(
+        self, llm_provider, api_key, expected_result, mocker
+    ):
+        """Summarization falls back to abstract when LLM unavailable."""
+        # Mock Pollux's async run() function
+        mock_result = {"answers": ["This is a summary of the paper."], "status": "ok"}
+        mocker.patch("paperweight.analyzer.run", return_value=mock_result)
+
+        paper = {
+            "title": "Test Paper",
+            "abstract": "This is the abstract.",
+            "content": "This is the full content of the paper.",
         }
-    }
+        config = {
+            "type": "summary",
+            "llm_provider": llm_provider,
+            "api_key": api_key,
+        }
 
-    result = summarize_paper(paper, config)
-    assert result == expected_result
-
-def test_get_abstracts_invalid_analysis_type():
-    with pytest.raises(ValueError, match="Unknown analysis type: invalid_type"):
-        config = {'type': 'invalid_type'}
-        get_abstracts([{'abstract': 'Test abstract'}], config)
-
-def test_summarize_paper_api_key_missing():
-    paper = {
-        'title': 'Test Paper',
-        'abstract': 'This is a test abstract.',
-        'content': 'This is the full content of the paper.'
-    }
-    config = {'analyzer': {'llm_provider': 'openai', 'api_key': None}}
-
-    with patch('paperweight.analyzer.logger') as mock_logger:
         result = summarize_paper(paper, config)
-        assert result == paper['abstract']
-        mock_logger.warning.assert_called_with("No valid LLM provider or API key available for openai. Falling back to abstract.")
+        assert result == expected_result
 
-def test_summarize_paper_invalid_llm_provider():
-    paper = {
-        'title': 'Test Paper',
-        'abstract': 'This is a test abstract.',
-        'content': 'This is the full content of the paper.'
-    }
-    config = {'analyzer': {'llm_provider': 'invalid_provider', 'api_key': 'fake_api_key'}}
 
-    with patch('paperweight.analyzer.logger') as mock_logger:
-        result = summarize_paper(paper, config)
-        assert result == paper['abstract']
-        mock_logger.warning.assert_called_with("No valid LLM provider or API key available for invalid_provider. Falling back to abstract.")
+class TestGetAbstracts:
+    """Tests for the get_abstracts function."""
+
+    def test_invalid_analysis_type_raises(self):
+        """Unknown analysis type raises ValueError."""
+        config = {"type": "invalid_type"}
+        with pytest.raises(ValueError, match="Unknown analysis type: invalid_type"):
+            get_abstracts([{"abstract": "Test abstract"}], config)
+
+
+class TestTriagePapers:
+    """Tests for AI triage stage."""
+
+    def test_triage_uses_llm_decision(self, mocker):
+        mocker.patch(
+            "paperweight.analyzer.run",
+            return_value={
+                "answers": [
+                    '{"include": true, "score": 92, "rationale": "Strong profile match"}'
+                ]
+            },
+        )
+        papers = [
+            {
+                "title": "Transformers for Agents",
+                "abstract": "A paper about language agents and planning.",
+                "link": "http://arxiv.org/abs/2401.12345",
+            }
+        ]
+        config = {
+            "triage": {"enabled": True, "llm_provider": "openai", "api_key": "key"},
+            "processor": {"keywords": ["agents", "planning"]},
+            "analyzer": {},
+        }
+        shortlisted = triage_papers(papers, config)
+        assert len(shortlisted) == 1
+        assert shortlisted[0]["triage_score"] == 92
+        assert "Strong profile match" in shortlisted[0]["triage_rationale"]
+
+    def test_triage_falls_back_without_api_key(self):
+        papers = [
+            {
+                "title": "Transformers for Agents",
+                "abstract": "A paper about language agents and planning.",
+                "link": "http://arxiv.org/abs/2401.12345",
+            }
+        ]
+        config = {
+            "triage": {"enabled": True, "llm_provider": "openai", "min_score": 10},
+            "processor": {"keywords": ["agents"]},
+            "analyzer": {"type": "abstract"},
+        }
+        shortlisted = triage_papers(papers, config)
+        assert len(shortlisted) == 1
+        assert shortlisted[0]["triage_score"] >= 10

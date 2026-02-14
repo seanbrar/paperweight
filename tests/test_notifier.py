@@ -1,6 +1,14 @@
+from datetime import date
 from unittest.mock import MagicMock, patch
 
-from paperweight.notifier import compile_and_send_notifications, send_email_notification
+from paperweight.notifier import (
+    compile_and_send_notifications,
+    render_atom_feed,
+    render_json_digest,
+    render_text_digest,
+    send_email_notification,
+    write_output,
+)
 
 
 @patch('paperweight.notifier.smtplib.SMTP')
@@ -24,6 +32,7 @@ def test_send_email_notification(mock_smtp):
     mock_server.sendmail.assert_called_once()
     mock_server.quit.assert_called_once()
 
+
 @patch('paperweight.notifier.send_email_notification')
 def test_compile_and_send_notifications_empty_list(mock_send_email):
     config = {
@@ -38,105 +47,68 @@ def test_compile_and_send_notifications_empty_list(mock_send_email):
     compile_and_send_notifications([], config)
     mock_send_email.assert_not_called()
 
-@patch('paperweight.notifier.send_email_notification')
-def test_compile_and_send_notifications_default_sort_order(mock_send_email):
+
+def test_render_text_digest_deterministic():
     papers = [
-        {'title': 'Paper A', 'date': '2023-01-01', 'summary': 'Summary A', 'link': 'http://a.com', 'relevance_score': 0.8},
-        {'title': 'Paper B', 'date': '2023-01-02', 'summary': 'Summary B', 'link': 'http://b.com', 'relevance_score': 0.9},
-        {'title': 'Paper C', 'date': '2023-01-03', 'summary': 'Summary C', 'link': 'http://c.com', 'relevance_score': 0.7},
+        {
+            "title": "B Paper",
+            "date": date(2024, 1, 2),
+            "summary": "Summary B",
+            "link": "http://arxiv.org/abs/2",
+            "relevance_score": 2.0,
+            "triage_rationale": "Matched transformer + planning",
+        },
+        {
+            "title": "A Paper",
+            "date": date(2024, 1, 1),
+            "summary": "Summary A",
+            "link": "http://arxiv.org/abs/1",
+            "relevance_score": 1.0,
+            "triage_rationale": "Matched profile keywords",
+        },
     ]
-    config = {
-        'email': {
-            'from': 'sender@example.com',
-            'to': 'recipient@example.com',
-            'password': 'password123',
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587
-        }
-    }
+    digest = render_text_digest(papers, sort_order="alphabetical")
+    assert "1. A Paper" in digest
+    assert "2. B Paper" in digest
+    assert "Why: Matched profile keywords" in digest
 
-    compile_and_send_notifications(papers, config)
 
-    mock_send_email.assert_called_once()
-    _, body, _ = mock_send_email.call_args[0]
-
-    # Check if the order of papers in the email body matches the input order
-    assert body.index('Paper A') < body.index('Paper B') < body.index('Paper C')
-
-@patch('paperweight.notifier.send_email_notification')
-def test_compile_and_send_notifications_explicit_relevance_sort(mock_send_email):
+def test_render_atom_feed_contains_required_elements():
     papers = [
-        {'title': 'Paper A', 'date': '2023-01-01', 'summary': 'Summary A', 'link': 'http://a.com', 'relevance_score': 0.8},
-        {'title': 'Paper B', 'date': '2023-01-02', 'summary': 'Summary B', 'link': 'http://b.com', 'relevance_score': 0.9},
-        {'title': 'Paper C', 'date': '2023-01-03', 'summary': 'Summary C', 'link': 'http://c.com', 'relevance_score': 0.7},
-    ]
-    config = {
-        'email': {
-            'from': 'sender@example.com',
-            'to': 'recipient@example.com',
-            'password': 'password123',
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'sort_order': 'relevance'
+        {
+            "title": "Test Paper",
+            "date": date(2024, 1, 2),
+            "summary": "Summary text",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "relevance_score": 5.5,
         }
-    }
+    ]
+    feed = render_atom_feed(papers)
+    assert "<?xml" in feed
+    assert "<feed" in feed
+    assert "<entry>" in feed
+    assert "Test Paper" in feed
+    assert "http://arxiv.org/abs/2401.12345" in feed
 
-    compile_and_send_notifications(papers, config)
 
-    mock_send_email.assert_called_once()
-    _, body, _ = mock_send_email.call_args[0]
+def test_write_output_to_file(tmp_path):
+    target = tmp_path / "digest.txt"
+    write_output("hello\n", str(target))
+    assert target.read_text(encoding="utf-8") == "hello\n"
 
-    # Check if the order of papers in the email body matches the input order
-    assert body.index('Paper A') < body.index('Paper B') < body.index('Paper C')
 
-@patch('paperweight.notifier.send_email_notification')
-def test_compile_and_send_notifications_alphabetical_sort(mock_send_email):
+def test_render_json_digest_contains_expected_fields():
     papers = [
-        {'title': 'Paper B', 'date': '2023-01-02', 'summary': 'Summary B', 'link': 'http://b.com', 'relevance_score': 0.9},
-        {'title': 'Paper A', 'date': '2023-01-01', 'summary': 'Summary A', 'link': 'http://a.com', 'relevance_score': 0.8},
-        {'title': 'Paper C', 'date': '2023-01-03', 'summary': 'Summary C', 'link': 'http://c.com', 'relevance_score': 0.7},
-    ]
-    config = {
-        'email': {
-            'from': 'sender@example.com',
-            'to': 'recipient@example.com',
-            'password': 'password123',
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'sort_order': 'alphabetical'
+        {
+            "title": "Test Paper",
+            "date": date(2024, 1, 2),
+            "summary": "Summary text",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "relevance_score": 5.5,
+            "triage_rationale": "Matched core interests",
         }
-    }
-
-    compile_and_send_notifications(papers, config)
-
-    mock_send_email.assert_called_once()
-    _, body, _ = mock_send_email.call_args[0]
-
-    # Check if the order of papers in the email body is alphabetical
-    assert body.index('Paper A') < body.index('Paper B') < body.index('Paper C')
-
-@patch('paperweight.notifier.send_email_notification')
-def test_compile_and_send_notifications_publication_time_sort(mock_send_email):
-    papers = [
-        {'title': 'Paper B', 'date': '2023-01-02', 'summary': 'Summary B', 'link': 'http://b.com', 'relevance_score': 0.9},
-        {'title': 'Paper A', 'date': '2023-01-01', 'summary': 'Summary A', 'link': 'http://a.com', 'relevance_score': 0.8},
-        {'title': 'Paper C', 'date': '2023-01-03', 'summary': 'Summary C', 'link': 'http://c.com', 'relevance_score': 0.7},
     ]
-    config = {
-        'email': {
-            'from': 'sender@example.com',
-            'to': 'recipient@example.com',
-            'password': 'password123',
-            'smtp_server': 'smtp.example.com',
-            'smtp_port': 587,
-            'sort_order': 'publication_time'
-        }
-    }
-
-    compile_and_send_notifications(papers, config)
-
-    mock_send_email.assert_called_once()
-    _, body, _ = mock_send_email.call_args[0]
-
-    # Check if the order of papers in the email body is by publication time (most recent first)
-    assert body.index('Paper C') < body.index('Paper B') < body.index('Paper A')
+    payload = render_json_digest(papers)
+    assert '"title": "Test Paper"' in payload
+    assert '"why": "Matched core interests"' in payload
+    assert '"score": 5.5' in payload

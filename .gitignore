@@ -4,6 +4,10 @@
 *.log
 config.yaml
 last_processed_date.txt
+data/
+artifacts/
+.DS_Store
+.coverage
 
 # Build artifacts
 build/

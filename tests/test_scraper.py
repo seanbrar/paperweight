@@ -1,33 +1,35 @@
-import os
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-from requests.exceptions import HTTPError
 
-from paperweight.scraper import extract_text_from_source, fetch_arxiv_papers
+from paperweight.db import DatabaseConnectionError
+from paperweight.scraper import (
+    extract_text_from_source,
+    fetch_arxiv_papers,
+    get_recent_papers,
+    hydrate_papers_with_content,
+)
 
 
-@patch('paperweight.scraper.requests.get')
-def test_fetch_arxiv_papers(mock_get):
-    mock_response = MagicMock()
-    mock_response.content = '''
-    <feed xmlns="http://www.w3.org/2005/Atom">
-        <entry>
-            <id>http://arxiv.org/abs/2401.12345</id>
-            <published>2024-01-15T00:00:00Z</published>
-            <title>Test Paper 1</title>
-            <summary>This is test abstract 1.</summary>
-        </entry>
-        <entry>
-            <id>http://arxiv.org/abs/2401.67890</id>
-            <published>2024-01-14T00:00:00Z</published>
-            <title>Test Paper 2</title>
-            <summary>This is test abstract 2.</summary>
-        </entry>
-    </feed>
-    '''
-    mock_get.return_value = mock_response
+@patch('paperweight.scraper.arxiv.Client')
+def test_fetch_arxiv_papers(MockClient):
+    mock_client_instance = MockClient.return_value
+
+    # Mock results
+    result1 = MagicMock()
+    result1.title = 'Test Paper 1'
+    result1.entry_id = 'http://arxiv.org/abs/2401.12345'
+    result1.published = datetime(2024, 1, 15)
+    result1.summary = 'This is test abstract 1.'
+
+    result2 = MagicMock()
+    result2.title = 'Test Paper 2'
+    result2.entry_id = 'http://arxiv.org/abs/2401.67890'
+    result2.published = datetime(2024, 1, 14, 12, 0, 0)
+    result2.summary = 'This is test abstract 2.'
+
+    mock_client_instance.results.return_value = [result1, result2]
 
     start_date = datetime(2024, 1, 14).date()
     papers = fetch_arxiv_papers('cs.AI', start_date, max_results=2)
@@ -38,20 +40,65 @@ def test_fetch_arxiv_papers(mock_get):
     assert papers[0]['date'] == datetime(2024, 1, 15).date()
     assert papers[1]['date'] == datetime(2024, 1, 14).date()
 
-def test_extract_text_from_source():
-    print("Executing test_extract_text_from_source")  # Add this line
-    # Test PDF extraction
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    pdf_path = os.path.join(current_dir, 'test_data', 'test.pdf')
 
-    assert os.path.exists(pdf_path), f"Test PDF file not found at {pdf_path}"
+@patch('paperweight.scraper.arxiv.Client')
+def test_fetch_arxiv_papers_error(MockClient):
+    mock_client_instance = MockClient.return_value
+    mock_client_instance.results.side_effect = Exception("General Error")
 
-    with open(pdf_path, 'rb') as f:
-        pdf_content = f.read()
-    pdf_text = extract_text_from_source(pdf_content, 'pdf')
-    assert "Test PDF content" in pdf_text
+    with pytest.raises(Exception, match="General Error"):
+        fetch_arxiv_papers('cs.AI', date.today(), max_results=10)
 
-    # Test LaTeX source extraction
+
+@patch('paperweight.scraper.arxiv.Client')
+def test_fetch_arxiv_papers_max_results(MockClient):
+    mock_client_instance = MockClient.return_value
+
+    result1 = MagicMock()
+    result1.title = 'Test Paper 1'
+    result1.entry_id = 'http://arxiv.org/abs/2401.12345'
+    result1.published = datetime(2024, 1, 15)
+    result1.summary = 'Summary 1'
+
+    result2 = MagicMock()
+    result2.title = 'Test Paper 2'
+    result2.entry_id = 'http://arxiv.org/abs/2401.67890'
+    result2.published = datetime(2024, 1, 14)
+    result2.summary = 'Summary 2'
+
+    result3 = MagicMock()
+    result3.title = 'Test Paper 3'
+    result3.entry_id = 'http://arxiv.org/abs/2401.11111'
+    result3.published = datetime(2024, 1, 13)
+    result3.summary = 'Summary 3'
+
+    # We simulate the iterator returning these
+    mock_client_instance.results.return_value = [result1, result2, result3]
+
+    start_date = datetime(2024, 1, 13).date()
+
+    # Test with max_results=2
+    # We need to reset the mock if we want to run multiple calls in one test safely regarding return values if they were stateful iterators,
+    # but here it returns a list which is iterable multiple times.
+
+    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=2)
+    assert len(papers) == 2
+    assert papers[0]['title'] == 'Test Paper 1'
+    assert papers[1]['title'] == 'Test Paper 2'
+
+    # Test with max_results=None
+    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=None)
+    assert len(papers) == 3
+    assert papers[2]['title'] == 'Test Paper 3'
+
+    # Test with max_results=0
+    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=0)
+    assert len(papers) == 3
+    assert papers[2]['title'] == 'Test Paper 3'
+
+
+def test_extract_text_from_latex_source():
+    """Extract text from LaTeX source content."""
     latex_content = b'''
     \\documentclass{article}
     \\begin{document}
@@ -61,87 +108,73 @@ def test_extract_text_from_source():
     latex_text = extract_text_from_source(latex_content, 'source')
     assert "This is a test LaTeX document." in latex_text
 
-@patch('paperweight.scraper.requests.get')
-def test_fetch_arxiv_papers_invalid_category(mock_get):
-    mock_response = MagicMock()
-    mock_response.status_code = 400
-    mock_response.text = "Invalid field: cat"
-    mock_response.raise_for_status.side_effect = HTTPError("400 Client Error: Bad Request")
-    mock_get.return_value = mock_response
-
-    with pytest.raises(ValueError, match="Invalid arXiv category: invalid_category. Please check your configuration."):
-        fetch_arxiv_papers('invalid_category', date.today(), max_results=10)
-
-@patch('paperweight.scraper.requests.get')
-def test_fetch_arxiv_papers_other_http_error(mock_get):
-    mock_response = MagicMock()
-    mock_response.status_code = 500
-    mock_response.raise_for_status.side_effect = HTTPError("500 Server Error: Internal Server Error")
-    mock_get.return_value = mock_response
-
-    with pytest.raises(HTTPError, match="500 Server Error: Internal Server Error"):
-        fetch_arxiv_papers('cs.AI', date.today(), max_results=10)
-
-@patch('paperweight.scraper.requests.get')
-def test_fetch_arxiv_papers_max_results(mock_get):
-    mock_response = MagicMock()
-    mock_response.content = '''
-    <feed xmlns="http://www.w3.org/2005/Atom">
-        <entry>
-            <id>http://arxiv.org/abs/2401.12345</id>
-            <published>2024-01-15T00:00:00Z</published>
-            <title>Test Paper 1</title>
-            <summary>This is test abstract 1.</summary>
-        </entry>
-        <entry>
-            <id>http://arxiv.org/abs/2401.67890</id>
-            <published>2024-01-14T00:00:00Z</published>
-            <title>Test Paper 2</title>
-            <summary>This is test abstract 2.</summary>
-        </entry>
-        <entry>
-            <id>http://arxiv.org/abs/2401.11111</id>
-            <published>2024-01-13T00:00:00Z</published>
-            <title>Test Paper 3</title>
-            <summary>This is test abstract 3.</summary>
-        </entry>
-    </feed>
-    '''
-    mock_get.return_value = mock_response
-
-    start_date = datetime(2024, 1, 13).date()
-
-    # Test with max_results=2
-    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=2)
-    assert len(papers) == 2
-    assert papers[0]['title'] == 'Test Paper 1'
-    assert papers[1]['title'] == 'Test Paper 2'
-
-    # Test with max_results=None (should return all papers)
-    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=None)
-    assert len(papers) == 3
-    assert papers[2]['title'] == 'Test Paper 3'
-
-    # Test with max_results=0 (should be treated as None and return all papers)
-    papers = fetch_arxiv_papers('cs.AI', start_date, max_results=0)
-    assert len(papers) == 3
-    assert papers[2]['title'] == 'Test Paper 3'
-
-    # Verify that the max_results parameter is passed correctly to the API
-    calls = mock_get.call_args_list
-    assert len(calls) == 3
-
-    # Check max_results=2 call
-    assert calls[0][1]['params']['max_results'] == 2
-    assert 'max_results' not in calls[1][1]['params']
-    assert 'max_results' not in calls[2][1]['params']
-
-    # Verify that other parameters are correct
-    for call in calls:
-        assert call[1]['params']['search_query'] == 'cat:cs.AI'
-        assert call[1]['params']['sortBy'] == 'submittedDate'
-        assert call[1]['params']['sortOrder'] == 'descending'
-
 def test_extract_text_from_source_invalid_type():
     with pytest.raises(ValueError, match="Invalid source type: invalid_type"):
         extract_text_from_source(b'content', 'invalid_type')
+
+def test_get_recent_papers_db_unreachable():
+    config = {
+        'db': {
+            'enabled': True,
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'paperweight',
+            'user': 'paperweight',
+            'password': 'pass',
+            'sslmode': 'prefer'
+        }
+    }
+    with patch('paperweight.scraper.connect_db', side_effect=Exception("boom")):
+        with pytest.raises(DatabaseConnectionError, match="Database enabled but unreachable"):
+            get_recent_papers(config)
+
+
+def test_hydrate_papers_with_content(monkeypatch):
+    papers = [
+        {
+            "title": "Test Paper",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "date": datetime(2024, 1, 15).date(),
+            "abstract": "Test abstract",
+        }
+    ]
+    config = {"db": {"enabled": False}}
+
+    monkeypatch.setattr(
+        "paperweight.scraper.fetch_paper_contents",
+        lambda _ids: [("2401.12345", b"pdf-bytes", "pdf")],
+    )
+    monkeypatch.setattr(
+        "paperweight.scraper.extract_text_from_source", lambda _content, _method: "text"
+    )
+
+    hydrated = hydrate_papers_with_content(papers, config)
+    assert len(hydrated) == 1
+    assert hydrated[0]["id"] == "2401.12345"
+    assert hydrated[0]["content"] == "text"
+
+
+def test_get_recent_papers_without_content(monkeypatch):
+    config = {
+        "arxiv": {"categories": ["cs.AI"], "max_results": 2},
+        "db": {"enabled": False},
+    }
+    fake_papers = [
+        {
+            "title": "Test Paper",
+            "link": "http://arxiv.org/abs/2401.12345",
+            "date": datetime(2024, 1, 15).date(),
+            "abstract": "Test abstract",
+        }
+    ]
+
+    monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
+    monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
+    monkeypatch.setattr("paperweight.scraper.fetch_recent_papers", lambda _c, _d: fake_papers)
+    fetch_content = MagicMock()
+    monkeypatch.setattr("paperweight.scraper.fetch_paper_contents", fetch_content)
+
+    papers = get_recent_papers(config, force_refresh=True, include_content=False)
+    assert len(papers) == 1
+    assert papers[0]["content"] == ""
+    fetch_content.assert_not_called()

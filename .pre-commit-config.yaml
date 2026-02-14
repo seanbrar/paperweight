@@ -10,3 +10,4 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-PyYAML, types-requests]
+        exclude: ^src/mocks/

@@ -1,16 +1,140 @@
-"""Module for sending email notifications about processed papers.
+"""Notification and digest rendering helpers.
 
-This module handles the creation and sending of email notifications about relevant papers
-that have been processed. It includes functionality for composing email content and
-sending emails through SMTP servers.
+paperweight's default delivery is a deterministic stdout digest. Atom feed and
+email delivery are optional adapters.
 """
 
+import json
 import logging
 import smtplib
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
+from typing import Any, Dict, List
+from xml.etree import ElementTree as ET
 
 logger = logging.getLogger(__name__)
+
+
+def _sort_papers(papers: List[Dict[str, Any]], sort_order: str) -> List[Dict[str, Any]]:
+    if sort_order == "alphabetical":
+        return sorted(papers, key=lambda x: x.get("title", "").lower())
+    if sort_order == "publication_time":
+        return sorted(papers, key=_format_paper_date, reverse=True)
+    return list(papers)
+
+
+def _format_paper_date(paper: Dict[str, Any]) -> str:
+    value = paper.get("date")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return str(value or "")
+
+
+def render_text_digest(
+    papers: List[Dict[str, Any]],
+    *,
+    sort_order: str = "relevance",
+    heading: str = "paperweight digest",
+) -> str:
+    """Render a deterministic plain-text digest."""
+    if not papers:
+        return "paperweight digest\n\nNo matching papers."
+
+    ordered = _sort_papers(papers, sort_order)
+    lines = [heading, ""]
+
+    for idx, paper in enumerate(ordered, start=1):
+        score = paper.get("relevance_score", paper.get("triage_score", 0.0))
+        lines.append(f"{idx}. {paper.get('title', 'Untitled')}")
+        lines.append(f"   Date: {_format_paper_date(paper)}")
+        lines.append(f"   Score: {score:.2f}")
+        if paper.get("triage_rationale"):
+            lines.append(f"   Why: {paper.get('triage_rationale')}")
+        lines.append(f"   Link: {paper.get('link', '')}")
+        lines.append(f"   Summary: {(paper.get('summary') or '').strip()}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_atom_feed(
+    papers: List[Dict[str, Any]],
+    *,
+    sort_order: str = "relevance",
+    feed_title: str = "paperweight",
+    feed_id: str = "https://github.com/seanbrar/paperweight",
+    feed_link: str = "https://github.com/seanbrar/paperweight",
+) -> str:
+    """Render an Atom feed from processed papers."""
+    ns = "http://www.w3.org/2005/Atom"
+    ET.register_namespace("", ns)
+    feed = ET.Element(f"{{{ns}}}feed")
+
+    ET.SubElement(feed, f"{{{ns}}}title").text = feed_title
+    ET.SubElement(feed, f"{{{ns}}}id").text = feed_id
+    ET.SubElement(feed, f"{{{ns}}}link", {"href": feed_link, "rel": "self"})
+    ET.SubElement(feed, f"{{{ns}}}updated").text = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    ordered = _sort_papers(papers, sort_order)
+    for paper in ordered:
+        entry = ET.SubElement(feed, f"{{{ns}}}entry")
+        link = paper.get("link", "")
+        title = paper.get("title", "Untitled")
+        summary = (paper.get("summary") or "").strip()
+        score = paper.get("relevance_score", 0.0)
+        rationale = (paper.get("triage_rationale") or "").strip()
+        date_text = _format_paper_date(paper)
+        updated = f"{date_text}T00:00:00Z" if len(date_text) == 10 else date_text
+
+        ET.SubElement(entry, f"{{{ns}}}id").text = link or title
+        ET.SubElement(entry, f"{{{ns}}}title").text = title
+        ET.SubElement(entry, f"{{{ns}}}updated").text = updated
+        if link:
+            ET.SubElement(entry, f"{{{ns}}}link", {"href": link, "rel": "alternate"})
+        ET.SubElement(entry, f"{{{ns}}}summary").text = summary
+        ET.SubElement(entry, f"{{{ns}}}content", {"type": "text"}).text = (
+            f"Score: {score:.2f}\nWhy: {rationale}\nLink: {link}\nSummary: {summary}"
+        )
+
+    xml_bytes = ET.tostring(feed, encoding="utf-8", xml_declaration=True)
+    return xml_bytes.decode("utf-8")
+
+
+def render_json_digest(
+    papers: List[Dict[str, Any]], *, sort_order: str = "relevance"
+) -> str:
+    """Render a deterministic JSON digest for scripting."""
+    ordered = _sort_papers(papers, sort_order)
+    payload = []
+    for paper in ordered:
+        payload.append(
+            {
+                "title": paper.get("title", "Untitled"),
+                "date": _format_paper_date(paper),
+                "score": paper.get("relevance_score", paper.get("triage_score", 0.0)),
+                "why": paper.get("triage_rationale", ""),
+                "link": paper.get("link", ""),
+                "summary": (paper.get("summary") or "").strip(),
+            }
+        )
+    return json.dumps(payload, indent=2, ensure_ascii=True)
+
+
+def write_output(content: str, output_path: str | None = None) -> None:
+    """Write digest/feed content to file or stdout."""
+    if output_path:
+        target = Path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        logger.info("Wrote output to %s", target)
+    else:
+        print(content, end="")
 
 
 def send_email_notification(subject, body, config):
@@ -21,14 +145,16 @@ def send_email_notification(subject, body, config):
         body: The body text of the email.
         config: Configuration dictionary containing email settings.
 
-    Raises:
-        smtplib.SMTPException: If there is an error sending the email.
+    Returns:
+        bool: True if the email was sent successfully, False otherwise.
     """
     from_email = config["email"]["from"]
-    from_password = config["email"]["password"]
+    from_password = config["email"].get("password")
     to_email = config["email"]["to"]
     smtp_server = config["email"]["smtp_server"]
     smtp_port = config["email"]["smtp_port"]
+    use_tls = config["email"].get("use_tls", True)
+    use_auth = config["email"].get("use_auth", True)
 
     # Create the email
     msg = MIMEMultipart()
@@ -41,15 +167,20 @@ def send_email_notification(subject, body, config):
     # Send the email
     try:
         server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(from_email, from_password)
+        if use_tls:
+            server.starttls()
+        if use_auth and from_password:
+            server.login(from_email, from_password)
+        elif use_auth and not from_password:
+            logger.warning("SMTP auth enabled but no password provided; skipping login.")
         text = msg.as_string()
         server.sendmail(from_email, to_email, text)
         server.quit()
         logger.info("Email notification sent successfully")
+        return True
     except Exception as e:
         logger.error(f"Failed to send email notification: {e}", exc_info=True)
-        raise
+        return False
 
 
 def compile_and_send_notifications(papers, config):
@@ -64,24 +195,11 @@ def compile_and_send_notifications(papers, config):
     """
     if not papers:
         logger.info("No papers to send notifications for.")
-        return
+        return False
 
     sort_order = config.get("email", {}).get("sort_order", "relevance")
-
-    if sort_order == "alphabetical":
-        papers = sorted(papers, key=lambda x: x["title"].lower())
-    elif sort_order == "publication_time":
-        papers = sorted(papers, key=lambda x: x["date"], reverse=True)
-    # For 'relevance' or any other value, we keep the existing order (already sorted by relevance)
-
+    papers = _sort_papers(papers, sort_order)
     subject = "New Papers from ArXiv"
-    body = "Here are the latest papers:\n\n"
-    for paper in papers:
-        body += f"Title: {paper['title']}\n"
-        body += f"Date: {paper['date']}\n"
-        body += f"Summary: {paper['summary']}\n"
-        body += f"Link: {paper['link']}\n"
-        body += f"Relevance Score: {paper['relevance_score']:.2f}\n\n"
-
+    body = render_text_digest(papers, sort_order=sort_order, heading="New Papers from ArXiv")
     success = send_email_notification(subject, body, config)
     return success
