@@ -324,7 +324,7 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--max-items",
         type=int,
         default=0,
-        help="Optional cap on number of delivered papers (0 = no cap)",
+        help="Optional cap on papers to process and deliver (0 = no cap)",
     )
 
 
@@ -473,6 +473,14 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             include_content=False,
             config_path=args.config,
         )
+        if args.max_items and args.max_items > 0 and len(recent_papers) > args.max_items:
+            logger.info(
+                "Applying max-items compute cap: processing first %s of %s fetched papers",
+                args.max_items,
+                len(recent_papers),
+            )
+            recent_papers = recent_papers[: args.max_items]
+
         shortlisted_papers = _apply_triage_and_hydrate(recent_papers, config)
         db_enabled = is_db_enabled(config)
 

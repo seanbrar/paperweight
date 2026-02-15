@@ -26,6 +26,7 @@ Behavior:
 - runs triage on title + abstract
 - hydrates full text only for shortlisted papers
 - scores/summarizes and delivers digest
+- `--max-items N` caps how many fetched papers enter processing (triage/hydration/summary); output may be fewer than `N` after filtering
 
 Delivery modes:
 

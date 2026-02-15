@@ -75,6 +75,9 @@ paperweight doctor --strict
 
 Detailed command behavior: `docs/CLI.md`
 
+`--max-items` is a processing cap (not a guaranteed output count): paperweight
+processes at most N fetched papers, and may output fewer if filters remove them.
+
 ## Configuration
 
 Core sections:

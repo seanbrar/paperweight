@@ -113,9 +113,13 @@ export PAPERWEIGHT_MAX_RESULTS=100
 ## Analyzer keys
 
 When `analyzer.type: summary`, API key is required.
+If a summary call fails at runtime, paperweight falls back to that paper's abstract.
 
 When `triage.enabled: true`, an API key is strongly recommended. Without one,
 paperweight falls back to a lightweight keyword/abstract heuristic.
+
+If triage LLM calls fail at runtime, paperweight falls back to heuristic triage
+for the entire batch to keep behavior consistent within a run.
 
 Provider keys:
 

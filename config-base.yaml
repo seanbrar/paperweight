@@ -25,6 +25,7 @@ analyzer:
   type: abstract  # summary | abstract
   llm_provider: openai  # openai | gemini
   # api_key: ${OPENAI_API_KEY}
+  # model: gpt-5-mini
   max_input_tokens: 7000
   max_input_chars: 20000
 
@@ -33,6 +34,7 @@ triage:
   enabled: true
   llm_provider: openai  # openai | gemini
   # api_key: ${OPENAI_API_KEY}
+  # model: gpt-5-mini
   min_score: 60
   max_selected: 25
 
