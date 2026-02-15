@@ -11,7 +11,6 @@ import io
 import logging
 import os
 import tarfile
-import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -272,18 +271,18 @@ def extract_text_from_source(content, method):
 
 
 def fetch_paper_contents(paper_ids):
-    """Fetch contents for multiple papers in parallel.
+    """Fetch contents for multiple papers.
 
     Args:
         paper_ids: List of arXiv paper IDs to fetch.
 
     Returns:
-        Dictionary mapping paper IDs to their content.
+        List of (paper_id, content, method) tuples.
     """
     contents = []
     total_papers = len(paper_ids)
     logger.info(f"Fetching content for {total_papers} papers")
-    for i, paper_id in enumerate(paper_ids):
+    for i, paper_id in enumerate(paper_ids, start=1):
         try:
             content, method = fetch_paper_content(paper_id)
             contents.append((paper_id, content, method))
@@ -291,14 +290,8 @@ def fetch_paper_contents(paper_ids):
             logger.error(f"Error fetching content for paper ID {paper_id}: {e}")
             contents.append((paper_id, None, None))
 
-        if (i + 1) % 4 == 0:
-            time.sleep(1)
-            logger.debug(
-                f"Processed {i + 1}/{total_papers} papers. Waiting 1 second..."
-            )
-
-        if (i + 1) % 20 == 0:
-            logger.info(f"Processed {i + 1}/{total_papers} papers")
+        if i % 20 == 0:
+            logger.info(f"Processed {i}/{total_papers} papers")
 
     logger.info(f"Finished fetching content for all {total_papers} papers")
     return contents

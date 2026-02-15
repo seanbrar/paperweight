@@ -246,9 +246,6 @@ def _handle_error(error, error_type):
 
 def _deliver_output(processed_papers, config, args):
     """Deliver processed papers via the requested adapter."""
-    if args.max_items and args.max_items > 0:
-        processed_papers = processed_papers[: args.max_items]
-
     if args.delivery == "stdout":
         digest = render_text_digest(processed_papers, sort_order=args.sort_order)
         write_output(digest, args.output)
