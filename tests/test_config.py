@@ -14,6 +14,7 @@ import yaml
 
 from paperweight.utils import (
     _check_arxiv_section,
+    apply_profile,
     check_config,
     expand_env_vars,
     load_config,
@@ -321,3 +322,48 @@ class TestArxivSectionValidation:
         """Negative max_results raises ValueError."""
         with pytest.raises(ValueError, match="'max_results' in 'arxiv' section must be a non-negative integer"):
             _check_arxiv_section({'categories': ['cs.AI'], 'max_results': -1})
+
+
+# ---------------------------------------------------------------------------
+# Profile Tests
+# ---------------------------------------------------------------------------
+
+class TestProfiles:
+    """Tests for profile switching."""
+
+    def test_apply_profile_deep_merges(self):
+        """Profile overlay deep-merges into base config."""
+        config = {
+            "arxiv": {"categories": ["cs.AI"], "max_results": 50},
+            "profiles": {
+                "fast": {"arxiv": {"max_results": 20}},
+            },
+        }
+        merged = apply_profile(config, "fast")
+        assert merged["arxiv"]["max_results"] == 20
+        assert merged["arxiv"]["categories"] == ["cs.AI"]
+        assert merged["active_profile"] == "fast"
+
+    def test_apply_profile_unknown_name_raises(self):
+        """Unknown profile name raises ValueError."""
+        config = {"profiles": {"fast": {"arxiv": {"max_results": 20}}}}
+        with pytest.raises(ValueError, match="Unknown profile: 'nope'"):
+            apply_profile(config, "nope")
+
+    def test_load_config_with_profile(self, tmp_path):
+        """load_config applies profile when given."""
+        cfg = {
+            "arxiv": {"categories": ["cs.AI"], "max_results": 50},
+            "processor": {"keywords": ["AI"]},
+            "analyzer": {"type": "abstract"},
+            "logging": {"level": "INFO"},
+            "profiles": {
+                "fast": {"arxiv": {"max_results": 10}},
+            },
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=False):
+            result = load_config(config_path=str(config_path), profile="fast")
+        assert result["arxiv"]["max_results"] == 10
+        assert result["active_profile"] == "fast"

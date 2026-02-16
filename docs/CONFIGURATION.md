@@ -48,6 +48,37 @@ This keeps runtime lower than downloading full text for every candidate.
 
 ## Optional sections
 
+### `metadata_cache`
+
+```yaml
+metadata_cache:
+  enabled: false
+  path: .paperweight_cache.json
+  ttl_hours: 4
+```
+
+When enabled, paperweight caches arXiv metadata locally and reuses it within the
+TTL window, skipping repeated API calls. `--force-refresh` bypasses the cache.
+
+### `profiles`
+
+```yaml
+profiles:
+  fast:
+    arxiv:
+      max_results: 20
+    triage:
+      max_selected: 10
+  deep:
+    arxiv:
+      max_results: 200
+    triage:
+      max_selected: 50
+```
+
+Activate with `--profile fast` or `PAPERWEIGHT_PROFILE=fast`. Each profile is
+a partial config overlay that deep-merges on top of the base config.
+
 ### `notifier` (only for `--delivery email`)
 
 ```yaml
@@ -118,8 +149,8 @@ If a summary call fails at runtime, paperweight falls back to that paper's abstr
 When `triage.enabled: true`, an API key is strongly recommended. Without one,
 paperweight falls back to a lightweight keyword/abstract heuristic.
 
-If triage LLM calls fail at runtime, paperweight falls back to heuristic triage
-for the entire batch to keep behavior consistent within a run.
+If triage LLM calls fail or time out at runtime, paperweight falls back to
+heuristic triage for the entire batch to keep behavior consistent within a run.
 
 Provider keys:
 
@@ -132,3 +163,4 @@ Provider keys:
 - `--delivery json` ignores `notifier`.
 - `--delivery atom` uses optional `feed` metadata.
 - `--delivery email` requires valid `notifier.email` settings.
+- `--profile NAME` deep-merges the named profile on top of the base config before env overrides.

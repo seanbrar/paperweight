@@ -38,6 +38,12 @@ triage:
   min_score: 60
   max_selected: 25
 
+# Metadata cache — avoids repeated arXiv API calls within the TTL window.
+metadata_cache:
+  enabled: false
+  path: .paperweight_cache.json
+  ttl_hours: 4
+
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
   file: paperweight.log
@@ -73,3 +79,17 @@ db:
 # Optional artifact storage path
 storage:
   base_dir: data/artifacts
+
+# Named profiles — activate with --profile NAME or PAPERWEIGHT_PROFILE env var.
+# Each profile is a partial config overlay that deep-merges on top of the base.
+# profiles:
+#   fast:
+#     arxiv:
+#       max_results: 20
+#     triage:
+#       max_selected: 10
+#   deep:
+#     arxiv:
+#       max_results: 200
+#     triage:
+#       max_selected: 50

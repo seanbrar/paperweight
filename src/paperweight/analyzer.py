@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Any, Dict, List, Literal, cast
 
-from pollux import Config, RetryPolicy, Source, run, run_many
+from pollux import Config, RetryPolicy, Source, run
 
 from paperweight.utils import count_tokens
 
@@ -18,8 +18,11 @@ ProviderName = Literal["gemini", "openai"]
 
 logger = logging.getLogger(__name__)
 
-# Keep summary fanout modest for provider stability and local predictability.
+# Keep fanout modest for provider stability and local predictability.
 SUMMARY_CONCURRENCY = 3
+TRIAGE_CONCURRENCY = 3
+LLM_TIMEOUT_S = 45.0
+RATIONALE_MAX_CHARS = 160
 
 
 def _int_setting(value: Any, default: int, *, minimum: int = 0) -> int:
@@ -36,6 +39,14 @@ def _float_setting(value: Any, default: float, *, minimum: float = 0.0) -> float
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, parsed)
+
+
+def _compact_rationale(text, *, max_chars=RATIONALE_MAX_CHARS):
+    """Whitespace-normalize and truncate a triage rationale."""
+    text = " ".join((text or "").split())
+    if len(text) > max_chars:
+        text = text[: max_chars - 1].rstrip() + "\u2026"
+    return text or "No rationale"
 
 
 def get_abstracts(processed_papers, config):
@@ -156,6 +167,7 @@ def _build_triage_prompt(paper: Dict[str, Any], profile: str) -> str:
     return (
         "You are triaging arXiv papers for relevance.\n"
         "Return JSON only with keys: include (boolean), score (0-100 number), rationale (string).\n"
+        "Rationale must be a compact one-liner (max 20 words).\n"
         "Be strict. Include only if likely useful to the profile.\n\n"
         f"Profile:\n{profile}\n\n"
         f"Title: {title}\n\n"
@@ -176,8 +188,45 @@ def _parse_triage_decision(response: Any, *, min_score: float) -> Dict[str, Any]
     parsed = json.loads(raw)
     score = float(parsed.get("score", 0.0))
     include = bool(parsed.get("include", score >= min_score))
-    rationale = str(parsed.get("rationale", "")).strip() or "No rationale"
+    rationale = _compact_rationale(str(parsed.get("rationale", "")))
     return {"include": include, "score": score, "rationale": rationale}
+
+
+async def _triage_one_paper_async(prompt, pollux_config, *, min_score):
+    """Call `run` for a single triage prompt with a timeout."""
+    result = await asyncio.wait_for(
+        run(prompt, config=pollux_config), timeout=LLM_TIMEOUT_S
+    )
+    answer = None
+    if isinstance(result, dict):
+        answers = result.get("answers")
+        if isinstance(answers, list) and answers:
+            answer = answers[0]
+    return _parse_triage_decision(answer, min_score=min_score)
+
+
+async def _run_triage_async(prompts, pollux_config, *, min_score):
+    """Run triage prompts concurrently with a semaphore, returning decisions in order."""
+    semaphore = asyncio.Semaphore(TRIAGE_CONCURRENCY)
+    total = len(prompts)
+    completed = 0
+
+    async def _worker(index, prompt):
+        nonlocal completed
+        async with semaphore:
+            decision = await _triage_one_paper_async(
+                prompt, pollux_config, min_score=min_score
+            )
+            completed += 1
+            logger.info("Triage: %d/%d", completed, total)
+            return index, decision
+
+    tasks = [asyncio.create_task(_worker(i, p)) for i, p in enumerate(prompts)]
+    results = [None] * total
+    for coro in asyncio.as_completed(tasks):
+        index, decision = await coro
+        results[index] = decision
+    return results
 
 
 def triage_papers(
@@ -226,15 +275,9 @@ def triage_papers(
     prompts = [_build_triage_prompt(paper, profile_text) for paper in papers]
 
     try:
-        result = asyncio.run(run_many(prompts, config=pollux_config))
-        answers = result.get("answers") if isinstance(result, dict) else None
-        if not isinstance(answers, list) or len(answers) != len(papers):
-            raise RuntimeError(
-                f"Unexpected triage response shape: got {len(answers or [])} answers for {len(papers)} papers."
-            )
-        decisions = [
-            _parse_triage_decision(answer, min_score=min_score) for answer in answers
-        ]
+        decisions = asyncio.run(
+            _run_triage_async(prompts, pollux_config, min_score=min_score)
+        )
     except Exception as exc:
         logger.warning(
             "AI triage failed; using heuristic triage for entire batch: %s",
@@ -291,7 +334,9 @@ async def _summarize_one_paper_async(
     input_tokens = count_tokens(prompt) + count_tokens(content)
     logger.debug("Summary input tokens title=%r count=%s", title[:60], input_tokens)
 
-    result = await run(prompt, source=source, config=pollux_config)
+    result = await asyncio.wait_for(
+        run(prompt, source=source, config=pollux_config), timeout=LLM_TIMEOUT_S
+    )
     response = None
     if isinstance(result, dict):
         answers = result.get("answers")
@@ -346,6 +391,8 @@ def summarize_papers(  # noqa: C901
         semaphore = asyncio.Semaphore(SUMMARY_CONCURRENCY)
         results: List[str | None] = [None] * len(papers)
         failures: List[tuple[int, BaseException]] = []
+        completed = 0
+        total = len(papers)
 
         async def _worker(index: int, paper: Dict[str, Any]):
             async with semaphore:
@@ -367,6 +414,8 @@ def summarize_papers(  # noqa: C901
 
         for task in asyncio.as_completed(tasks):
             index, summary, exc = await task
+            completed += 1
+            logger.info("Summary: %d/%d", completed, total)
             if exc is not None:
                 failures.append((index, exc))
                 continue

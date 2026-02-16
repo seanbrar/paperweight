@@ -71,13 +71,18 @@ analyzer:
   max_input_tokens: 7000
   max_input_chars: 20000
 
+metadata_cache:
+  enabled: false
+  path: .paperweight_cache.json
+  ttl_hours: 4
+
 logging:
   level: INFO
   file: paperweight.log
 """
 
 
-def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml"):
+def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml", profile=None):
     """Set up the application and fetch papers.
 
     Args:
@@ -88,7 +93,7 @@ def setup_and_get_papers(force_refresh, include_content=True, config_path="confi
         Tuple of (papers, config) where papers is a list of paper dictionaries and
         config is the loaded configuration dictionary.
     """
-    config = load_config(config_path=config_path)
+    config = load_config(config_path=config_path, profile=profile)
     setup_logging(config["logging"])
     logger.info("Configuration loaded successfully")
 
@@ -323,6 +328,12 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=0,
         help="Optional cap on papers to process and deliver (0 = no cap)",
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Activate a named profile from the config's profiles section",
+    )
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
@@ -356,6 +367,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         help="Return non-zero if any warnings are present",
+    )
+    doctor_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Activate a named profile from the config's profiles section",
     )
 
     return parser
@@ -396,7 +413,7 @@ def _write_minimal_config(path: str, force: bool = False) -> None:
     print(f"Wrote config: {target}")
 
 
-def _doctor(config_path: str, strict: bool = False) -> int:
+def _doctor(config_path: str, strict: bool = False, profile: str = None) -> int:
     results: list[tuple[str, str, str]] = []
 
     config_file = Path(config_path)
@@ -408,12 +425,16 @@ def _doctor(config_path: str, strict: bool = False) -> int:
         return 1
 
     try:
-        config = load_config(config_path=config_path)
+        config = load_config(config_path=config_path, profile=profile)
         results.append(("OK", "config parse", "Loaded and validated"))
     except Exception as e:
         results.append(("FAIL", "config parse", str(e)))
         _print_doctor(results)
         return 1
+
+    active_profile = config.get("active_profile")
+    if active_profile:
+        results.append(("OK", "profile", active_profile))
 
     triage_cfg = config.get("triage", {})
     triage_enabled = triage_cfg.get("enabled", True)
@@ -469,6 +490,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:
             args.force_refresh,
             include_content=False,
             config_path=args.config,
+            profile=getattr(args, "profile", None),
         )
         if args.max_items and args.max_items > 0 and len(recent_papers) > args.max_items:
             logger.info(
@@ -524,11 +546,12 @@ def main(argv: list[str] | None = None) -> int:
         args.output = getattr(args, "output", None)
         args.sort_order = getattr(args, "sort_order", "relevance")
         args.max_items = getattr(args, "max_items", 0)
+        args.profile = getattr(args, "profile", None)
     if args.command == "init":
         _write_minimal_config(args.config, force=args.force)
         return 0
     if args.command == "doctor":
-        return _doctor(args.config, strict=getattr(args, "strict", False))
+        return _doctor(args.config, strict=getattr(args, "strict", False), profile=getattr(args, "profile", None))
     return _run_pipeline(args)
 
 

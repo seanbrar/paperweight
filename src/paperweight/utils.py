@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+from copy import deepcopy
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
@@ -82,7 +83,29 @@ def override_with_env(config, *, _path=()):
     return config
 
 
-def load_config(config_path="config.yaml"):
+def _deep_merge_dicts(base, override):
+    """Recursively merge *override* into a deep copy of *base*."""
+    merged = deepcopy(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def apply_profile(config, profile_name):
+    """Apply a named profile on top of *config* and return the merged result."""
+    profiles = config.get("profiles", {})
+    if profile_name not in profiles:
+        raise ValueError(f"Unknown profile: '{profile_name}'")
+    overlay = profiles[profile_name]
+    merged = _deep_merge_dicts(config, overlay)
+    merged["active_profile"] = profile_name
+    return merged
+
+
+def load_config(config_path="config.yaml", profile=None):
     """Load and validate the application configuration.
 
     Args:
@@ -105,6 +128,12 @@ def load_config(config_path="config.yaml"):
             raise ValueError("Empty configuration file")
 
         config = expand_env_vars(config)
+
+        # Profile switching: CLI flag > env var > none
+        profile_name = profile or os.environ.get("PAPERWEIGHT_PROFILE")
+        if profile_name:
+            config = apply_profile(config, profile_name)
+
         config = override_with_env(config)
 
         # Handle API keys
@@ -171,6 +200,10 @@ def check_config(config):
             _check_db_section(config["db"])
         if "storage" in config:
             _check_storage_section(config["storage"])
+        if "metadata_cache" in config:
+            _check_metadata_cache_section(config["metadata_cache"])
+        if "profiles" in config:
+            _check_profiles_section(config["profiles"])
     except KeyError as e:
         raise ValueError(f"Missing required section or key: {e}")
 
@@ -318,6 +351,28 @@ def _check_storage_section(storage):
     """Validate the storage section of the configuration."""
     if "base_dir" not in storage:
         raise ValueError("Missing required storage field: 'base_dir'")
+
+
+def _check_metadata_cache_section(mc):
+    """Validate the metadata_cache section of the configuration."""
+    if not isinstance(mc, dict):
+        raise ValueError("'metadata_cache' must be a mapping")
+    if "ttl_hours" in mc:
+        try:
+            val = int(mc["ttl_hours"])
+        except (TypeError, ValueError):
+            raise ValueError("'ttl_hours' in 'metadata_cache' must be a valid integer")
+        if val < 0:
+            raise ValueError("'ttl_hours' in 'metadata_cache' must be non-negative")
+
+
+def _check_profiles_section(profiles):
+    """Validate the profiles section of the configuration."""
+    if not isinstance(profiles, dict):
+        raise ValueError("'profiles' must be a mapping")
+    for name, overlay in profiles.items():
+        if not isinstance(overlay, dict):
+            raise ValueError(f"Profile '{name}' must be a mapping")
 
 
 def is_valid_arxiv_category(category):

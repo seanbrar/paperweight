@@ -97,7 +97,7 @@ class TestTriagePapers:
 
     def test_triage_uses_llm_decision(self, mocker):
         mocker.patch(
-            "paperweight.analyzer.run_many",
+            "paperweight.analyzer.run",
             new=AsyncMock(
                 return_value={
                     "answers": [
@@ -125,7 +125,7 @@ class TestTriagePapers:
 
     def test_triage_falls_back_for_entire_batch_when_llm_errors(self, mocker):
         mocker.patch(
-            "paperweight.analyzer.run_many",
+            "paperweight.analyzer.run",
             new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
         )
         papers = [

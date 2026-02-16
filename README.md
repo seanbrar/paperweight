@@ -71,6 +71,9 @@ paperweight run --delivery email
 
 # strict checks for CI/release gates
 paperweight doctor --strict
+
+# activate a named profile
+paperweight run --profile fast
 ```
 
 Detailed command behavior: `docs/CLI.md`
@@ -86,6 +89,8 @@ Core sections:
 - `triage`: shortlist gate (title + abstract)
 - `processor`: scoring config
 - `analyzer`: `abstract` or `summary`
+- `metadata_cache` (optional, speeds up repeated runs)
+- `profiles` (optional, named config overlays)
 - `logging`
 - `notifier` (optional, only for email)
 

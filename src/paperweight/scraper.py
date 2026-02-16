@@ -8,6 +8,7 @@ API interactions and various methods for processing paper content.
 import gzip
 import hashlib
 import io
+import json
 import logging
 import os
 import tarfile
@@ -337,6 +338,84 @@ def hydrate_papers_with_content(papers, config):
     return _hydrate_papers_with_content(papers, config, db_enabled)
 
 
+def _int_setting(value, default, *, minimum=0):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+def _metadata_cache_options(config):
+    """Return (enabled, path, ttl_hours) from config['metadata_cache']."""
+    mc = config.get("metadata_cache", {})
+    enabled = mc.get("enabled", False)
+    path = mc.get("path", ".paperweight_cache.json")
+    ttl_hours = _int_setting(mc.get("ttl_hours"), 4, minimum=0)
+    return enabled, path, ttl_hours
+
+
+def _metadata_cache_key(config):
+    """Build a stable key from the parameters that affect which papers are fetched."""
+    cats = sorted(config.get("arxiv", {}).get("categories", []))
+    max_r = config.get("arxiv", {}).get("max_results", 0)
+    today = datetime.now().date().isoformat()
+    raw = f"{cats}|{max_r}|{today}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _serialize_metadata_papers(papers):
+    """Convert paper list to JSON-safe form (dates become ISO strings)."""
+    out = []
+    for p in papers:
+        rec = dict(p)
+        if isinstance(rec.get("date"), date):
+            rec["date"] = rec["date"].isoformat()
+        out.append(rec)
+    return out
+
+
+def _deserialize_metadata_papers(records):
+    """Restore paper list from JSON-safe form."""
+    out = []
+    for rec in records:
+        rec = dict(rec)
+        if isinstance(rec.get("date"), str):
+            rec["date"] = datetime.strptime(rec["date"], "%Y-%m-%d").date()
+        out.append(rec)
+    return out
+
+
+def _load_metadata_cache(cache_path, expected_key, ttl_hours):
+    """Return cached papers or None if cache is missing/stale/corrupt."""
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("key") != expected_key:
+            return None
+        written = datetime.fromisoformat(data["written_at"])
+        if (datetime.now() - written).total_seconds() > ttl_hours * 3600:
+            return None
+        return _deserialize_metadata_papers(data["papers"])
+    except (OSError, json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def _write_metadata_cache(cache_path, key, papers):
+    """Write paper metadata to the cache file."""
+    payload = {
+        "key": key,
+        "written_at": datetime.now().isoformat(),
+        "papers": _serialize_metadata_papers(papers),
+    }
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        logger.debug("Wrote metadata cache to %s (%d papers)", cache_path, len(papers))
+    except OSError as e:
+        logger.warning("Could not write metadata cache: %s", e)
+
+
 def get_recent_papers(config, force_refresh=False, include_content=True):
     """Get recent papers, either from cache or by fetching new ones.
 
@@ -380,7 +459,21 @@ def get_recent_papers(config, force_refresh=False, include_content=True):
             )
 
     logger.info(f"Fetching papers for the last {days} days")
-    recent_papers = fetch_recent_papers(config, days)
+
+    # Metadata cache: skip arXiv API calls when a fresh cache exists
+    cache_enabled, cache_path, cache_ttl = _metadata_cache_options(config)
+    cache_key = _metadata_cache_key(config)
+    recent_papers = None
+    if cache_enabled and not force_refresh:
+        recent_papers = _load_metadata_cache(cache_path, cache_key, cache_ttl)
+        if recent_papers is not None:
+            logger.info("Loaded %d papers from metadata cache", len(recent_papers))
+
+    if recent_papers is None:
+        recent_papers = fetch_recent_papers(config, days)
+        if cache_enabled:
+            _write_metadata_cache(cache_path, cache_key, recent_papers)
+
     logger.info(f"Fetched {len(recent_papers)} recent papers")
 
     papers_result = recent_papers

@@ -33,7 +33,7 @@ def test_doctor_success_with_loaded_config(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "paperweight.main.load_config",
-        lambda config_path: {
+        lambda config_path, profile=None: {
             "arxiv": {"categories": ["cs.AI"]},
             "processor": {"keywords": ["agents"]},
             "analyzer": {"type": "abstract"},
@@ -54,7 +54,7 @@ def test_doctor_strict_fails_on_warning(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "paperweight.main.load_config",
-        lambda config_path: {
+        lambda config_path, profile=None: {
             "arxiv": {"categories": ["cs.AI"]},
             "processor": {"keywords": ["agents"]},
             "analyzer": {"type": "abstract", "llm_provider": "openai"},
@@ -65,3 +65,27 @@ def test_doctor_strict_fails_on_warning(tmp_path, monkeypatch):
 
     exit_code = main(["doctor", "--config", str(config_path), "--strict"])
     assert exit_code == 1
+
+
+def test_doctor_passes_profile_to_config_loader(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("placeholder: true\n", encoding="utf-8")
+
+    observed = {}
+
+    def fake_load(config_path, profile=None):
+        observed["profile"] = profile
+        return {
+            "arxiv": {"categories": ["cs.AI"]},
+            "processor": {"keywords": ["agents"]},
+            "analyzer": {"type": "abstract"},
+            "triage": {"enabled": False},
+            "logging": {"level": "INFO"},
+            "active_profile": profile,
+        }
+
+    monkeypatch.setattr("paperweight.main.load_config", fake_load)
+
+    exit_code = main(["doctor", "--config", str(config_path), "--profile", "fast"])
+    assert exit_code == 0
+    assert observed["profile"] == "fast"

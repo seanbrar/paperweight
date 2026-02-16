@@ -17,7 +17,8 @@ paperweight run \
   [--delivery stdout|json|atom|email] \
   [--output PATH] \
   [--sort-order relevance|alphabetical|publication_time] \
-  [--max-items N]
+  [--max-items N] \
+  [--profile NAME]
 ```
 
 Behavior:
@@ -27,6 +28,7 @@ Behavior:
 - hydrates full text only for shortlisted papers
 - scores/summarizes and delivers digest
 - `--max-items N` caps how many fetched papers enter processing (triage/hydration/summary); output may be fewer than `N` after filtering
+- `--profile NAME` activates a named profile from the config's `profiles` section (or set `PAPERWEIGHT_PROFILE` env var)
 
 Delivery modes:
 
@@ -58,7 +60,7 @@ Behavior:
 ## doctor
 
 ```bash
-paperweight doctor [--config PATH] [--strict]
+paperweight doctor [--config PATH] [--strict] [--profile NAME]
 ```
 
 Checks:
