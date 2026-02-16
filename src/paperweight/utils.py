@@ -202,6 +202,8 @@ def check_config(config):
             _check_storage_section(config["storage"])
         if "metadata_cache" in config:
             _check_metadata_cache_section(config["metadata_cache"])
+        if "concurrency" in config:
+            _check_concurrency_section(config["concurrency"])
         if "profiles" in config:
             _check_profiles_section(config["profiles"])
     except KeyError as e:
@@ -364,6 +366,25 @@ def _check_metadata_cache_section(mc):
             raise ValueError("'ttl_hours' in 'metadata_cache' must be a valid integer")
         if val < 0:
             raise ValueError("'ttl_hours' in 'metadata_cache' must be non-negative")
+
+
+def _check_concurrency_section(concurrency):
+    """Validate the concurrency section of the configuration."""
+    if not isinstance(concurrency, dict):
+        raise ValueError("'concurrency' must be a mapping")
+    limits = {
+        "content_fetch": (1, 20),
+        "triage": (1, 10),
+        "summary": (1, 10),
+    }
+    for key, (lo, hi) in limits.items():
+        if key in concurrency:
+            try:
+                val = int(concurrency[key])
+            except (TypeError, ValueError):
+                raise ValueError(f"'{key}' in 'concurrency' must be a valid integer")
+            if val < lo or val > hi:
+                raise ValueError(f"'{key}' in 'concurrency' must be between {lo} and {hi}")
 
 
 def _check_profiles_section(profiles):

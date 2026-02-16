@@ -300,7 +300,7 @@ def test_pipeline_end_to_end_stubbed(monkeypatch, tmp_path):
     def fake_fetch_recent_papers(_config, _days):
         return list(fake_papers)
 
-    def fake_fetch_paper_contents(paper_ids):
+    def fake_fetch_paper_contents(paper_ids, max_workers=6):
         return [(paper_id, b"stub content", "pdf") for paper_id in paper_ids]
 
     monkeypatch.setattr(
@@ -384,13 +384,15 @@ class TestMainErrorHandling:
         )
 
     def test_default_delivery_writes_digest(self, mock_main_dependencies):
-        """Default mode renders and writes stdout digest."""
+        """Default mode renders and writes stdout digest; abstract mode skips hydration."""
         main()
         mock_main_dependencies['get_recent_papers'].assert_called_once_with(
             mock_main_dependencies['load_config'].return_value, include_content=False
         )
         mock_main_dependencies['triage_papers'].assert_called_once()
-        mock_main_dependencies['hydrate_papers_with_content'].assert_called_once()
+        mock_main_dependencies['process_papers'].assert_called_once()
+        # Abstract mode skips content hydration entirely
+        mock_main_dependencies['hydrate_papers_with_content'].assert_not_called()
         mock_main_dependencies['render_text_digest'].assert_called_once()
         mock_main_dependencies['write_output'].assert_called_once()
         mock_main_dependencies['notifications'].assert_not_called()

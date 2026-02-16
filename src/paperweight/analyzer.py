@@ -49,12 +49,13 @@ def _compact_rationale(text, *, max_chars=RATIONALE_MAX_CHARS):
     return text or "No rationale"
 
 
-def get_abstracts(processed_papers, config):
+def get_abstracts(processed_papers, config, *, summary_concurrency=None):
     """Extract abstracts or summaries from processed papers based on configuration.
 
     Args:
         processed_papers: List of dictionaries containing paper data.
         config: Configuration dictionary specifying analysis type and parameters.
+        summary_concurrency: Optional override for the number of concurrent summary workers.
 
     Returns:
         List of strings containing either abstracts or summaries based on config type.
@@ -67,7 +68,7 @@ def get_abstracts(processed_papers, config):
     if analysis_type == "abstract":
         return [paper["abstract"] for paper in processed_papers]
     if analysis_type == "summary":
-        return summarize_papers(processed_papers, config)
+        return summarize_papers(processed_papers, config, summary_concurrency=summary_concurrency)
     raise ValueError(f"Unknown analysis type: {analysis_type}")
 
 
@@ -205,9 +206,9 @@ async def _triage_one_paper_async(prompt, pollux_config, *, min_score):
     return _parse_triage_decision(answer, min_score=min_score)
 
 
-async def _run_triage_async(prompts, pollux_config, *, min_score):
+async def _run_triage_async(prompts, pollux_config, *, min_score, concurrency=TRIAGE_CONCURRENCY):
     """Run triage prompts concurrently with a semaphore, returning decisions in order."""
-    semaphore = asyncio.Semaphore(TRIAGE_CONCURRENCY)
+    semaphore = asyncio.Semaphore(concurrency)
     total = len(prompts)
     completed = 0
 
@@ -274,9 +275,11 @@ def triage_papers(
 
     prompts = [_build_triage_prompt(paper, profile_text) for paper in papers]
 
+    triage_concurrency = full_config.get("concurrency", {}).get("triage", TRIAGE_CONCURRENCY)
+
     try:
         decisions = asyncio.run(
-            _run_triage_async(prompts, pollux_config, min_score=min_score)
+            _run_triage_async(prompts, pollux_config, min_score=min_score, concurrency=triage_concurrency)
         )
     except Exception as exc:
         logger.warning(
@@ -366,6 +369,8 @@ def _resolve_summary_model_config(config: Dict[str, Any]) -> tuple[ProviderName,
 def summarize_papers(  # noqa: C901
     papers: List[Dict[str, Any]],
     config: Dict[str, Any],
+    *,
+    summary_concurrency: int | None = None,
 ) -> List[str]:
     """Summarize papers with abstract fallback on runtime LLM errors."""
     if not papers:
@@ -374,6 +379,7 @@ def summarize_papers(  # noqa: C901
     provider, model_name, api_key = _resolve_summary_model_config(config)
     max_input_tokens = _int_setting(config.get("max_input_tokens"), 7000, minimum=500)
     max_input_chars = _int_setting(config.get("max_input_chars"), 20_000, minimum=1000)
+    effective_concurrency = summary_concurrency if summary_concurrency is not None else SUMMARY_CONCURRENCY
 
     pollux_config = Config(
         provider=provider,
@@ -388,7 +394,7 @@ def summarize_papers(  # noqa: C901
     )
 
     async def _run_summary_batch() -> tuple[List[str | None], List[tuple[int, BaseException]]]:
-        semaphore = asyncio.Semaphore(SUMMARY_CONCURRENCY)
+        semaphore = asyncio.Semaphore(effective_concurrency)
         results: List[str | None] = [None] * len(papers)
         failures: List[tuple[int, BaseException]] = []
         completed = 0

@@ -40,13 +40,19 @@ triage:
 
 # Metadata cache — avoids repeated arXiv API calls within the TTL window.
 metadata_cache:
-  enabled: false
+  enabled: true
   path: .paperweight_cache.json
   ttl_hours: 4
 
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
   file: paperweight.log
+
+# Concurrency limits for parallelized pipeline stages.
+concurrency:
+  content_fetch: 6   # 1-20, threads for paper content downloads
+  triage: 3           # 1-10, async LLM workers for triage
+  summary: 3          # 1-10, async LLM workers for summarization
 
 # Optional metadata for --delivery atom
 feed:

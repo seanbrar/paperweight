@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import tarfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -271,31 +272,42 @@ def extract_text_from_source(content, method):
         return decompressed.decode("utf-8", errors="ignore")
 
 
-def fetch_paper_contents(paper_ids):
-    """Fetch contents for multiple papers.
+def fetch_paper_contents(paper_ids, max_workers=6):
+    """Fetch contents for multiple papers in parallel.
 
     Args:
         paper_ids: List of arXiv paper IDs to fetch.
+        max_workers: Maximum number of concurrent download threads.
 
     Returns:
-        List of (paper_id, content, method) tuples.
+        List of (paper_id, content, method) tuples, in the same order as *paper_ids*.
     """
-    contents = []
     total_papers = len(paper_ids)
-    logger.info(f"Fetching content for {total_papers} papers")
-    for i, paper_id in enumerate(paper_ids, start=1):
+    logger.info(f"Fetching content for {total_papers} papers (workers={max_workers})")
+
+    results: List[Any] = [None] * total_papers
+    index_by_id = {pid: i for i, pid in enumerate(paper_ids)}
+
+    def _fetch(paper_id):
         try:
             content, method = fetch_paper_content(paper_id)
-            contents.append((paper_id, content, method))
+            return paper_id, content, method
         except Exception as e:
             logger.error(f"Error fetching content for paper ID {paper_id}: {e}")
-            contents.append((paper_id, None, None))
+            return paper_id, None, None
 
-        if i % 20 == 0:
-            logger.info(f"Processed {i}/{total_papers} papers")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch, pid): pid for pid in paper_ids}
+        completed = 0
+        for future in as_completed(futures):
+            paper_id, content, method = future.result()
+            results[index_by_id[paper_id]] = (paper_id, content, method)
+            completed += 1
+            if completed % 20 == 0:
+                logger.info(f"Fetched {completed}/{total_papers} papers")
 
     logger.info(f"Finished fetching content for all {total_papers} papers")
-    return contents
+    return results
 
 
 def _hydrate_papers_with_content(papers, config, db_enabled):
@@ -303,8 +315,9 @@ def _hydrate_papers_with_content(papers, config, db_enabled):
     if not papers:
         return []
 
+    max_workers = config.get("concurrency", {}).get("content_fetch", 6)
     paper_ids = [paper["link"].split("/abs/")[-1] for paper in papers]
-    contents = fetch_paper_contents(paper_ids)
+    contents = fetch_paper_contents(paper_ids, max_workers=max_workers)
 
     papers_with_content = []
     storage_base = config.get("storage", {}).get("base_dir", "data/artifacts")
@@ -349,7 +362,7 @@ def _int_setting(value, default, *, minimum=0):
 def _metadata_cache_options(config):
     """Return (enabled, path, ttl_hours) from config['metadata_cache']."""
     mc = config.get("metadata_cache", {})
-    enabled = mc.get("enabled", False)
+    enabled = mc.get("enabled", True)
     path = mc.get("path", ".paperweight_cache.json")
     ttl_hours = _int_setting(mc.get("ttl_hours"), 4, minimum=0)
     return enabled, path, ttl_hours
@@ -442,25 +455,7 @@ def get_recent_papers(config, force_refresh=False, include_content=True):  # noq
     current_date = datetime.now().date()
     logger.info(f"Current date: {current_date}")
 
-    if last_processed_date is None or force_refresh:
-        # If never run before, fetch papers from the last 7 days
-        days = 7
-        logger.info("First run detected. Fetching papers from the last 7 days.")
-    else:
-        days = (current_date - last_processed_date).days
-        if days == 0:
-            logger.info("Already processed papers for today. No new papers to fetch.")
-            return []
-        elif days > 7:
-            # If more than a week has passed, limit to 7 days to avoid overload
-            days = 7
-            logger.warning(
-                f"More than a week since last run. Limiting fetch to last {days} days."
-            )
-
-    logger.info(f"Fetching papers for the last {days} days")
-
-    # Metadata cache: skip arXiv API calls when a fresh cache exists
+    # Metadata cache: check before computing days so same-day runs can hit cache
     cache_enabled, cache_path, cache_ttl = _metadata_cache_options(config)
     cache_key = _metadata_cache_key(config)
     recent_papers = None
@@ -470,6 +465,23 @@ def get_recent_papers(config, force_refresh=False, include_content=True):  # noq
             logger.info("Loaded %d papers from metadata cache", len(recent_papers))
 
     if recent_papers is None:
+        if last_processed_date is None or force_refresh:
+            # If never run before, fetch papers from the last 7 days
+            days = 7
+            logger.info("First run detected. Fetching papers from the last 7 days.")
+        else:
+            days = (current_date - last_processed_date).days
+            if days == 0:
+                logger.info("Already processed papers for today. No new papers to fetch.")
+                return []
+            elif days > 7:
+                # If more than a week has passed, limit to 7 days to avoid overload
+                days = 7
+                logger.warning(
+                    f"More than a week since last run. Limiting fetch to last {days} days."
+                )
+
+        logger.info(f"Fetching papers for the last {days} days")
         recent_papers = fetch_recent_papers(config, days)
         if cache_enabled:
             _write_metadata_cache(cache_path, cache_key, recent_papers)

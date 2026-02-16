@@ -169,27 +169,16 @@ def test_run_json_respects_max_items(tmp_path, monkeypatch):
     assert payload.count('"title"') == 1
 
 
-def test_run_max_items_caps_processing_before_hydration(tmp_path, monkeypatch):
+def test_run_max_items_caps_metadata_before_triage(tmp_path, monkeypatch, capsys):
+    """--max-items caps papers before triage/scoring; abstract mode skips hydration."""
     config_path = _write_config(tmp_path, triage_enabled=False)
     _stub_scraper_two_papers(monkeypatch)
 
-    observed = {"hydrated_count": 0}
+    hydrate_called = {"called": False}
 
     def fake_hydrate(papers, _config):
-        observed["hydrated_count"] = len(papers)
-        hydrated = []
-        for paper in papers:
-            paper_id = paper["link"].split("/abs/")[-1]
-            hydrated.append(
-                {
-                    **paper,
-                    "id": paper_id,
-                    "content": "transformer agent",
-                    "content_type": "pdf",
-                    "artifacts": [],
-                }
-            )
-        return hydrated
+        hydrate_called["called"] = True
+        return papers
 
     monkeypatch.setattr("paperweight.main.hydrate_papers_with_content", fake_hydrate)
 
@@ -207,4 +196,8 @@ def test_run_max_items_caps_processing_before_hydration(tmp_path, monkeypatch):
     )
 
     assert exit_code == 0
-    assert observed["hydrated_count"] == 1
+    # Abstract mode should never hydrate
+    assert not hydrate_called["called"]
+    # Only 1 paper should be delivered
+    out = capsys.readouterr().out
+    assert out.count("Score:") == 1

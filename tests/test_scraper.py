@@ -143,7 +143,7 @@ def test_hydrate_papers_with_content(monkeypatch):
 
     monkeypatch.setattr(
         "paperweight.scraper.fetch_paper_contents",
-        lambda _ids: [("2401.12345", b"pdf-bytes", "pdf")],
+        lambda _ids, max_workers=6: [("2401.12345", b"pdf-bytes", "pdf")],
     )
     monkeypatch.setattr(
         "paperweight.scraper.extract_text_from_source", lambda _content, _method: "text"
