@@ -105,7 +105,7 @@ def apply_profile(config, profile_name):
     return merged
 
 
-def load_config(config_path="config.yaml", profile=None):
+def load_config(config_path="config.yaml", profile=None):  # noqa: C901
     """Load and validate the application configuration.
 
     Args:

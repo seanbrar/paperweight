@@ -416,7 +416,7 @@ def _write_metadata_cache(cache_path, key, papers):
         logger.warning("Could not write metadata cache: %s", e)
 
 
-def get_recent_papers(config, force_refresh=False, include_content=True):
+def get_recent_papers(config, force_refresh=False, include_content=True):  # noqa: C901
     """Get recent papers, either from cache or by fetching new ones.
 
     Args:

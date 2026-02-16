@@ -413,7 +413,7 @@ def _write_minimal_config(path: str, force: bool = False) -> None:
     print(f"Wrote config: {target}")
 
 
-def _doctor(config_path: str, strict: bool = False, profile: str = None) -> int:
+def _doctor(config_path: str, strict: bool = False, profile: str | None = None) -> int:
     results: list[tuple[str, str, str]] = []
 
     config_file = Path(config_path)
