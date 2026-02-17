@@ -5,64 +5,68 @@ time saved, setup simplicity, and digest quality.
 
 ## Product definition
 
+paperweight is a **fast, scriptable arXiv interface** — the himalaya of academic papers.
+It fetches structured arXiv data, scores by keywords, and outputs rich JSON.
+AI enrichment (triage, summarization) is available via config but imposes zero cost
+on the default path.
+
 paperweight should be better than "just checking arXiv" when the user wants:
 
 - a smaller daily reading queue
-- deterministic output that can be automated
-- relevance filtering that improves over time
+- deterministic output that can be automated and piped
+- keyword-scored relevance filtering out of the box
+- structured metadata (authors, categories, PDF URLs) for scripting
 
 ## Core success metrics
 
 These metrics guide all releases:
 
 1. **Time to first useful run**
-   - target: <= 5 minutes from install to first digest
+   - target: <= 2 minutes from install to first digest
 2. **Daily digest size**
    - target: median 5-20 items after user tuning
 3. **Runtime**
-   - target: <= 120 seconds for `3 categories x max_results=50` on default non-summary mode
+   - target: sub-second warm runs (metadata cached), <= 60s cold fetch for 3 categories x 50 papers
 4. **CLI reliability**
    - target: >= 99% successful runs in local smoke workflows
 5. **Signal quality (human-evaluated)**
    - target: >= 7/10 items marked "worth reading" in pilot usage
 
-## v0.2 release gates (must pass)
+## v0.3 focus (config resilience, richer metadata, performance, CLI polish)
 
-1. CLI contract stable:
-   - `run`, `init`, `doctor`
-   - `run` delivery: `stdout`, `json`, `atom`, optional `email`
-2. Zero-key baseline works:
-   - `init` defaults to `analyzer.type: abstract`
-   - `run` works without LLM keys via triage fallback
-3. Setup validation:
-   - `doctor --strict` returns non-zero on warnings/failures
-4. Output ergonomics:
-   - deterministic text digest
-   - scriptable JSON
-   - Atom feed export
-5. Quality checks:
-   - lint clean
-   - tests green (including small CLI integration suite)
-6. Packaging:
-   - release workflow present and tag-driven
+1. **Config resilience**
+   - DEFAULT_CONFIG ensures partial/minimal configs never crash
+   - triage disabled by default (opt-in via config)
+   - log file optional (stderr-only by default)
+   - target: `paperweight run` works with only `arxiv.categories` set
+2. **Richer metadata**
+   - capture authors, categories, PDF URL, arXiv ID from API
+   - track which keywords matched during scoring
+   - JSON output includes full structured data contract
+   - target: JSON schema always complete without AI
+3. **Performance**
+   - lazy imports for heavy dependencies (psycopg, pollux, tiktoken, pypdf)
+   - parallel category fetching
+   - target: sub-second warm runs, ~3x cold-fetch speedup
+4. **CLI polish & API surface**
+   - `--version` flag
+   - `init` prints clean error (not traceback) when config exists
+   - `__init__.py` exposes `__version__` and key public functions
+   - target: scriptable from `import paperweight` without submodule diving
 
-## v0.3 focus (quality lift, not surface-area lift)
+## v0.4 focus (typed data, AI enrichment, feedback loop)
 
-1. **Speed**
-   - add metadata cache
-   - target: >= 40% runtime reduction on repeated daily runs
-2. **Digest quality**
+1. **Typed data structures**
+   - replace `Dict[str, Any]` pipeline with `Paper` dataclass/Pydantic model
+   - eliminate in-place mutation in `process_papers` (return new objects)
+   - target: zero `KeyError` risk from undocumented dict keys
+2. **AI enrichment polish**
    - improve triage rationale quality and compactness
-   - target: rationale present on >= 95% of shortlisted items
-3. **Workflow fit**
-   - add saved presets/profile switching
-   - target: switch profile in one command, no config edits
-
-## v0.4 focus (feedback loop)
-
-1. add local feedback capture (`relevant` / `irrelevant`)
-2. incorporate feedback into ranking
-3. target: +20% improvement in user-rated relevance from v0.2 baseline
+   - target: rationale present on >= 95% of shortlisted items when triage enabled
+3. **Feedback loop**
+   - add local feedback capture (`relevant` / `irrelevant`)
+   - incorporate feedback into ranking
+   - target: +20% improvement in user-rated relevance from v0.2 baseline
 
 ## v1.0 criteria
 

@@ -46,12 +46,6 @@ MINIMAL_CONFIG_TEMPLATE = """arxiv:
     - cs.CL
   max_results: 50
 
-triage:
-  enabled: true
-  llm_provider: openai
-  min_score: 60
-  max_selected: 25
-
 processor:
   keywords:
     - transformer
@@ -64,11 +58,10 @@ processor:
   content_keyword_weight: 1
   exclusion_keyword_penalty: 5
   important_words_weight: 0.5
-  min_score: 10
+  min_score: 3
 
 analyzer:
   type: abstract
-  llm_provider: openai
   max_input_tokens: 7000
   max_input_chars: 20000
 
@@ -84,7 +77,6 @@ concurrency:
 
 logging:
   level: INFO
-  file: paperweight.log
 """
 
 
@@ -387,6 +379,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="paperweight: Fetch, triage, and summarize arXiv papers"
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"paperweight {get_package_version()}",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser("run", help="Run the paperweight pipeline")
@@ -431,7 +428,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Backward-compatible default: `paperweight [run-args]` == `paperweight run [run-args]`
     known_commands = {"run", "init", "doctor"}
-    if args_list and args_list[0] in {"-h", "--help"}:
+    if args_list and args_list[0] in {"-h", "--help", "--version"}:
         return parser.parse_args(args_list)
     if args_list and args_list[0] in known_commands:
         return parser.parse_args(args_list)
@@ -484,7 +481,7 @@ def _doctor(config_path: str, strict: bool = False, profile: str | None = None) 
         results.append(("OK", "profile", active_profile))
 
     triage_cfg = config.get("triage", {})
-    triage_enabled = triage_cfg.get("enabled", True)
+    triage_enabled = triage_cfg.get("enabled", False)
     triage_provider = (
         triage_cfg.get("llm_provider")
         or config.get("analyzer", {}).get("llm_provider")
@@ -568,10 +565,18 @@ def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
         # 3. Score (title + abstract keywords — no content needed)
         progress.phase("scoring...")
         scored_papers = score_papers(triaged_papers, config)
-        progress.phase_end(
-            "scoring...",
-            f"{len(scored_papers)} papers above threshold" if scored_papers else "0 papers above threshold",
-        )
+        if not scored_papers and triaged_papers:
+            threshold = config.get("processor", {}).get("min_score", 0)
+            progress.phase_end(
+                "scoring...",
+                f"0/{len(triaged_papers)} above min_score ({threshold}) — "
+                "try adding keywords or lowering processor.min_score",
+            )
+        else:
+            progress.phase_end(
+                "scoring...",
+                f"{len(scored_papers)} papers above threshold" if scored_papers else "0 papers above threshold",
+            )
 
         # 4. Hydrate ONLY if analyzer needs full content (summary mode)
         if scored_papers and config.get("analyzer", {}).get("type") == "summary":
@@ -636,8 +641,12 @@ def main(argv: list[str] | None = None) -> int:
         args.profile = getattr(args, "profile", None)
         args.quiet = getattr(args, "quiet", False)
     if args.command == "init":
-        _write_minimal_config(args.config, force=args.force)
-        return 0
+        try:
+            _write_minimal_config(args.config, force=args.force)
+            return 0
+        except ValueError as exc:
+            print(f"paperweight init: {exc}", file=sys.stderr)
+            return 1
     if args.command == "doctor":
         return _doctor(args.config, strict=getattr(args, "strict", False), profile=getattr(args, "profile", None))
     return _run_pipeline(args)
