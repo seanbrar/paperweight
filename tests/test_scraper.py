@@ -18,7 +18,6 @@ from paperweight.scraper import (
     hydrate_papers_with_content,
 )
 
-
 # ---------------------------------------------------------------------------
 # fetch_arxiv_papers — batched OR query
 # ---------------------------------------------------------------------------
@@ -419,7 +418,7 @@ def _make_item_xml(
 ):
     """Build a minimal RSS <item> element for testing."""
     parts = [
-        f"<item>",
+        "<item>",
         f"<title>{title}</title>",
         f"<link>{link}</link>",
         f"<description>{description}</description>",
@@ -538,6 +537,7 @@ def test_fetch_rss_deduplicates_across_categories(mock_fetch):
 @patch("paperweight.scraper._fetch_single_rss_feed")
 def test_fetch_rss_one_category_fails(mock_fetch):
     """If one category feed fails, other categories still return papers."""
+
     def side_effect(url):
         if "cs.AI" in url:
             raise ConnectionError("boom")

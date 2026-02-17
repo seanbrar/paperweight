@@ -22,9 +22,7 @@ class TestModuleImports:
         import paperweight
 
         package_path = paperweight.__path__
-        module_names = [
-            name for _, name, _ in pkgutil.iter_modules(package_path)
-        ]
+        module_names = [name for _, name, _ in pkgutil.iter_modules(package_path)]
 
         for module_name in module_names:
             full_name = f"paperweight.{module_name}"

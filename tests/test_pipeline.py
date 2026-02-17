@@ -48,6 +48,7 @@ MAILPIT_HTTP_PORT_ENV = "PAPERWEIGHT_MAILPIT_HTTP_PORT"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def integration_config(tmp_path):
     """Load and patch config for integration testing."""
@@ -81,10 +82,10 @@ def integration_config(tmp_path):
 def mock_main_dependencies(mocker):
     """Mock all external dependencies for main() tests."""
     # Mock sys.argv to prevent argparse from picking up pytest arguments
-    mocker.patch('sys.argv', ['paperweight'])
+    mocker.patch("sys.argv", ["paperweight"])
 
     # Mock configuration and logging
-    mock_load_config = mocker.patch('paperweight.main.load_config')
+    mock_load_config = mocker.patch("paperweight.main.load_config")
     mock_load_config.return_value = {
         "logging": {"level": "INFO"},
         "processor": {},
@@ -92,61 +93,59 @@ def mock_main_dependencies(mocker):
         "notifier": {"email": {}},
         "db": {"enabled": False},
     }
-    mock_setup_logging = mocker.patch('paperweight.main.setup_logging')
+    mock_setup_logging = mocker.patch("paperweight.main.setup_logging")
 
     # Mock paper fetching and processing
-    mock_get_recent_papers = mocker.patch('paperweight.main.get_recent_papers')
+    mock_get_recent_papers = mocker.patch("paperweight.main.get_recent_papers")
     mock_get_recent_papers.return_value = [{"id": "1234.5678", "title": "Test Paper"}]
     mock_triage_papers = mocker.patch("paperweight.main.triage_papers")
     mock_triage_papers.side_effect = lambda papers, _config: papers
     mock_hydrate_papers = mocker.patch("paperweight.main.hydrate_papers_with_content")
     mock_hydrate_papers.side_effect = lambda papers, _config: papers
 
-    mock_process_papers = mocker.patch('paperweight.main.process_papers')
+    mock_process_papers = mocker.patch("paperweight.main.process_papers")
     mock_process_papers.return_value = [
         {"id": "1234.5678", "title": "Test Paper", "relevance_score": 0.8}
     ]
 
-    mock_get_abstracts = mocker.patch('paperweight.main.get_abstracts')
+    mock_get_abstracts = mocker.patch("paperweight.main.get_abstracts")
     mock_get_abstracts.return_value = ["Test summary"]
 
     # Mock digest rendering/writing
-    mock_render_text_digest = mocker.patch('paperweight.main.render_text_digest')
+    mock_render_text_digest = mocker.patch("paperweight.main.render_text_digest")
     mock_render_text_digest.return_value = "digest"
-    mock_render_json_digest = mocker.patch('paperweight.main.render_json_digest')
+    mock_render_json_digest = mocker.patch("paperweight.main.render_json_digest")
     mock_render_json_digest.return_value = "[]"
-    mock_write_output = mocker.patch('paperweight.main.write_output')
-    mock_render_atom_feed = mocker.patch('paperweight.main.render_atom_feed')
+    mock_write_output = mocker.patch("paperweight.main.write_output")
+    mock_render_atom_feed = mocker.patch("paperweight.main.render_atom_feed")
     mock_render_atom_feed.return_value = "<feed/>"
 
     # Mock notifications
-    mock_notifications = mocker.patch(
-        'paperweight.main.compile_and_send_notifications'
-    )
+    mock_notifications = mocker.patch("paperweight.main.compile_and_send_notifications")
     mock_notifications.return_value = True
 
     # Mock database functions
-    mock_is_db_enabled = mocker.patch('paperweight.main.is_db_enabled')
+    mock_is_db_enabled = mocker.patch("paperweight.main.is_db_enabled")
     mock_is_db_enabled.return_value = False
 
     # Mock logger
-    mock_logger = mocker.patch('paperweight.main.logger')
+    mock_logger = mocker.patch("paperweight.main.logger")
 
     return {
-        'load_config': mock_load_config,
-        'setup_logging': mock_setup_logging,
-        'get_recent_papers': mock_get_recent_papers,
-        'triage_papers': mock_triage_papers,
-        'hydrate_papers_with_content': mock_hydrate_papers,
-        'process_papers': mock_process_papers,
-        'get_abstracts': mock_get_abstracts,
-        'render_text_digest': mock_render_text_digest,
-        'render_json_digest': mock_render_json_digest,
-        'write_output': mock_write_output,
-        'render_atom_feed': mock_render_atom_feed,
-        'notifications': mock_notifications,
-        'logger': mock_logger,
-        'is_db_enabled': mock_is_db_enabled,
+        "load_config": mock_load_config,
+        "setup_logging": mock_setup_logging,
+        "get_recent_papers": mock_get_recent_papers,
+        "triage_papers": mock_triage_papers,
+        "hydrate_papers_with_content": mock_hydrate_papers,
+        "process_papers": mock_process_papers,
+        "get_abstracts": mock_get_abstracts,
+        "render_text_digest": mock_render_text_digest,
+        "render_json_digest": mock_render_json_digest,
+        "write_output": mock_write_output,
+        "render_atom_feed": mock_render_atom_feed,
+        "notifications": mock_notifications,
+        "logger": mock_logger,
+        "is_db_enabled": mock_is_db_enabled,
     }
 
 
@@ -154,10 +153,11 @@ def mock_main_dependencies(mocker):
 # Full Pipeline Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 @pytest.mark.skipif(
     not os.getenv(LIVE_INTEGRATION_ENV),
-    reason=f"Set {LIVE_INTEGRATION_ENV}=1 to run live integration test."
+    reason=f"Set {LIVE_INTEGRATION_ENV}=1 to run live integration test.",
 )
 def test_pipeline_end_to_end(integration_config):  # noqa: C901
     """Full pipeline: fetch, process, summarize, store, notify."""
@@ -187,7 +187,9 @@ def test_pipeline_end_to_end(integration_config):  # noqa: C901
             config_hash = hash_config(integration_config)
             pipeline_version = get_package_version()
             with connect_db(integration_config["db"]) as conn:
-                run_id = create_run(conn, config_hash, pipeline_version, "pytest_integration")
+                run_id = create_run(
+                    conn, config_hash, pipeline_version, "pytest_integration"
+                )
                 conn.commit()
 
         # 1. Fetch
@@ -217,7 +219,9 @@ def test_pipeline_end_to_end(integration_config):  # noqa: C901
                 conn.commit()
 
         # 4. Notify
-        notification_sent = compile_and_send_notifications(processed, integration_config["notifier"])
+        notification_sent = compile_and_send_notifications(
+            processed, integration_config["notifier"]
+        )
         assert notification_sent, "Notification send failed"
 
         # 5. Verify Email
@@ -338,74 +342,79 @@ def test_pipeline_end_to_end_stubbed(monkeypatch, tmp_path):
 # Error Handling Tests (absorbed from test_main.py)
 # ---------------------------------------------------------------------------
 
+
 class TestMainErrorHandling:
     """Tests for error handling in the main entry point."""
 
     def test_config_yaml_error(self, mock_main_dependencies):
         """YAML parsing errors are logged."""
-        mock_main_dependencies['load_config'].side_effect = yaml.YAMLError("Invalid YAML")
+        mock_main_dependencies["load_config"].side_effect = yaml.YAMLError(
+            "Invalid YAML"
+        )
 
         main()
-        mock_main_dependencies['logger'].error.assert_called_with(
+        mock_main_dependencies["logger"].error.assert_called_with(
             "Configuration error: Invalid YAML"
         )
 
     def test_network_error(self, mock_main_dependencies):
         """Network errors are logged."""
-        mock_main_dependencies['load_config'].side_effect = requests.RequestException(
+        mock_main_dependencies["load_config"].side_effect = requests.RequestException(
             "Connection failed"
         )
 
         main()
-        mock_main_dependencies['logger'].error.assert_called_with(
+        mock_main_dependencies["logger"].error.assert_called_with(
             "Network error occurred: Connection failed"
         )
 
     def test_database_unreachable(self, mock_main_dependencies, mocker):
         """Database connection errors are logged."""
         mocker.patch(
-            'paperweight.main.setup_and_get_papers',
+            "paperweight.main.setup_and_get_papers",
             side_effect=DatabaseConnectionError("Database enabled but unreachable."),
         )
 
         main()
-        mock_main_dependencies['logger'].error.assert_called_with(
+        mock_main_dependencies["logger"].error.assert_called_with(
             "Database error: Database enabled but unreachable."
         )
 
     def test_no_papers_found(self, mock_main_dependencies):
         """When no papers are found, notification is not called."""
-        mock_main_dependencies['get_recent_papers'].return_value = []
+        mock_main_dependencies["get_recent_papers"].return_value = []
 
         main()
-        mock_main_dependencies['notifications'].assert_not_called()
-        mock_main_dependencies['logger'].info.assert_any_call(
+        mock_main_dependencies["notifications"].assert_not_called()
+        mock_main_dependencies["logger"].info.assert_any_call(
             "No new papers to process. Exiting."
         )
 
     def test_default_delivery_writes_digest(self, mock_main_dependencies):
         """Default mode renders and writes stdout digest; abstract mode skips hydration."""
         main()
-        mock_main_dependencies['get_recent_papers'].assert_called_once_with(
-            mock_main_dependencies['load_config'].return_value, include_content=False
+        mock_main_dependencies["get_recent_papers"].assert_called_once_with(
+            mock_main_dependencies["load_config"].return_value, include_content=False
         )
-        mock_main_dependencies['triage_papers'].assert_called_once()
-        mock_main_dependencies['process_papers'].assert_called_once()
+        mock_main_dependencies["triage_papers"].assert_called_once()
+        mock_main_dependencies["process_papers"].assert_called_once()
         # Abstract mode skips content hydration entirely
-        mock_main_dependencies['hydrate_papers_with_content'].assert_not_called()
-        mock_main_dependencies['render_text_digest'].assert_called_once()
-        mock_main_dependencies['write_output'].assert_called_once()
-        mock_main_dependencies['notifications'].assert_not_called()
+        mock_main_dependencies["hydrate_papers_with_content"].assert_not_called()
+        mock_main_dependencies["render_text_digest"].assert_called_once()
+        mock_main_dependencies["write_output"].assert_called_once()
+        mock_main_dependencies["notifications"].assert_not_called()
 
     def test_email_delivery_uses_notifier(self, mock_main_dependencies, monkeypatch):
         """Email mode delegates to notifier adapter."""
-        monkeypatch.setattr('sys.argv', ['paperweight', '--delivery', 'email'])
+        monkeypatch.setattr("sys.argv", ["paperweight", "--delivery", "email"])
         main()
-        mock_main_dependencies['notifications'].assert_called_once()
+        mock_main_dependencies["notifications"].assert_called_once()
 
-    def test_json_delivery_uses_json_renderer(self, mock_main_dependencies, monkeypatch):
+    def test_json_delivery_uses_json_renderer(
+        self, mock_main_dependencies, monkeypatch
+    ):
         """JSON mode renders JSON payload and writes output."""
-        monkeypatch.setattr('sys.argv', ['paperweight', '--delivery', 'json'])
+        monkeypatch.setattr("sys.argv", ["paperweight", "--delivery", "json"])
         main()
-        mock_main_dependencies['render_json_digest'].assert_called_once()
-        mock_main_dependencies['write_output'].assert_called_once()
+        mock_main_dependencies["render_json_digest"].assert_called_once()
+        mock_main_dependencies["write_output"].assert_called_once()

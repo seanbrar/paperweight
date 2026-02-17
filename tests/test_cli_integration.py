@@ -61,7 +61,8 @@ def _stub_scraper(monkeypatch):
         lambda _ids: [("2401.12345", b"stub-bytes", "pdf")],
     )
     monkeypatch.setattr(
-        "paperweight.scraper.extract_text_from_source", lambda _c, _m: "transformer agent"
+        "paperweight.scraper.extract_text_from_source",
+        lambda _c, _m: "transformer agent",
     )
     monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
     monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
@@ -101,7 +102,8 @@ def _stub_scraper_two_papers(monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        "paperweight.scraper.extract_text_from_source", lambda _c, _m: "transformer agent"
+        "paperweight.scraper.extract_text_from_source",
+        lambda _c, _m: "transformer agent",
     )
     monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
     monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)

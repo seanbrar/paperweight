@@ -323,7 +323,9 @@ def fetch_rss_papers(categories):
                 seen_ids.add(paper["id"])
                 papers.append(paper)
 
-    logger.info("RSS fetched %d unique papers from %d categories", len(papers), len(categories))
+    logger.info(
+        "RSS fetched %d unique papers from %d categories", len(papers), len(categories)
+    )
     return papers
 
 

@@ -20,6 +20,7 @@ def parse_database_url(url: str) -> dict:
     """Parse a PostgreSQL URL into a config dict."""
     # postgresql://user:pass@host:port/database
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     return {
         "host": parsed.hostname,

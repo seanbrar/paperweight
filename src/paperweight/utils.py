@@ -35,10 +35,18 @@ DEFAULT_CONFIG = {
         "important_words_weight": 0.5,
         "min_score": 3,
     },
-    "analyzer": {"type": "abstract", "max_input_tokens": 7000, "max_input_chars": 20000},
+    "analyzer": {
+        "type": "abstract",
+        "max_input_tokens": 7000,
+        "max_input_chars": 20000,
+    },
     "triage": {"enabled": False},
     "logging": {"level": "INFO"},
-    "metadata_cache": {"enabled": True, "path": ".paperweight_cache.json", "ttl_hours": 4},
+    "metadata_cache": {
+        "enabled": True,
+        "path": ".paperweight_cache.json",
+        "ttl_hours": 4,
+    },
     "concurrency": {"content_fetch": 6, "triage": 3, "summary": 3},
 }
 
@@ -362,7 +370,14 @@ def _check_db_section(db):
         int(db["port"])
     except (ValueError, TypeError) as e:
         raise ValueError("'port' in 'db' section must be a valid integer") from e
-    valid_sslmodes = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+    valid_sslmodes = {
+        "disable",
+        "allow",
+        "prefer",
+        "require",
+        "verify-ca",
+        "verify-full",
+    }
     if db["sslmode"] not in valid_sslmodes:
         raise ValueError(
             f"Invalid sslmode '{db['sslmode']}'. Must be one of: {', '.join(sorted(valid_sslmodes))}"
@@ -404,7 +419,9 @@ def _check_concurrency_section(concurrency):
             except (TypeError, ValueError):
                 raise ValueError(f"'{key}' in 'concurrency' must be a valid integer")
             if val < lo or val > hi:
-                raise ValueError(f"'{key}' in 'concurrency' must be between {lo} and {hi}")
+                raise ValueError(
+                    f"'{key}' in 'concurrency' must be between {lo} and {hi}"
+                )
 
 
 def _check_profiles_section(profiles):
@@ -537,13 +554,15 @@ def split_arxiv_id(raw_id):
     raw = (raw_id or "").strip()
     if "/abs/" in raw:
         raw = raw.split("/abs/")[-1]
-    raw = raw.replace("http://arxiv.org/abs/", "").replace(
-        "https://arxiv.org/abs/", ""
-    )
+    raw = raw.replace("http://arxiv.org/abs/", "").replace("https://arxiv.org/abs/", "")
     new_style = re.match(r"^(?P<id>\d{4}\.\d{4,5})(?P<version>v\d+)?$", raw)
     if new_style:
-        return new_style.group("id"), new_style.group("version") or DEFAULT_ARXIV_VERSION
+        return new_style.group("id"), new_style.group(
+            "version"
+        ) or DEFAULT_ARXIV_VERSION
     legacy_style = re.match(r"^(?P<id>[a-z\-]+/\d{7})(?P<version>v\d+)?$", raw)
     if legacy_style:
-        return legacy_style.group("id"), legacy_style.group("version") or DEFAULT_ARXIV_VERSION
+        return legacy_style.group("id"), legacy_style.group(
+            "version"
+        ) or DEFAULT_ARXIV_VERSION
     return raw, DEFAULT_ARXIV_VERSION

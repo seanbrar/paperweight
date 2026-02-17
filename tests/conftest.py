@@ -79,7 +79,13 @@ def base_test_config(tmp_path: Path) -> Dict[str, Any]:
             "max_results": 10,
         },
         "processor": {
-            "keywords": ["machine learning", "neural network", "deep learning", "ai", "transformer"],
+            "keywords": [
+                "machine learning",
+                "neural network",
+                "deep learning",
+                "ai",
+                "transformer",
+            ],
             "exclusion_keywords": [],  # Don't exclude anything for testing
             "important_words": ["novel", "state-of-the-art"],
             "title_keyword_weight": 3,

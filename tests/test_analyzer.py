@@ -64,7 +64,9 @@ class TestSummarizePaper:
         with pytest.raises(ValueError, match="Summary analyzer requires"):
             summarize_paper(paper, config)
 
-    def test_summarize_falls_back_to_abstract_when_model_returns_no_answers(self, mocker):
+    def test_summarize_falls_back_to_abstract_when_model_returns_no_answers(
+        self, mocker
+    ):
         mocker.patch("pollux.run", new=AsyncMock(return_value={"answers": []}))
 
         paper = {
@@ -149,7 +151,8 @@ class TestTriagePapers:
         assert len(shortlisted) == 1
         assert shortlisted[0]["title"] == "Transformers for Agents"
         assert all(
-            "heuristic fallback" in paper["triage_rationale"].lower() for paper in papers
+            "heuristic fallback" in paper["triage_rationale"].lower()
+            for paper in papers
         )
 
     def test_triage_falls_back_without_api_key(self):
