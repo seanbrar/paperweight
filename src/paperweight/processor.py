@@ -33,6 +33,7 @@ def process_papers(
         if score >= processor_config["min_score"]:
             paper["relevance_score"] = score
             paper["score_breakdown"] = score_breakdown
+            paper["keywords_matched"] = score_breakdown.get("keywords_matched", [])
             processed_papers.append(paper)
         else:
             logger.debug(
@@ -90,20 +91,20 @@ def calculate_paper_score(paper, config):
     abstract = paper.get("abstract", "")
     content = paper.get("content", "")
 
-    title_keywords = count_keywords(title, config["keywords"])
-    abstract_keywords = count_keywords(abstract, config["keywords"])
-    content_keywords = count_keywords(content, config["keywords"])
+    title_kw_score, title_matched = count_keywords(title, config["keywords"])
+    abstract_kw_score, abstract_matched = count_keywords(abstract, config["keywords"])
+    content_kw_score, _ = count_keywords(content, config["keywords"])
 
     max_title_score = 50
     max_abstract_score = 50
     max_content_score = 25
 
-    title_score = min(title_keywords * config["title_keyword_weight"], max_title_score)
+    title_score = min(title_kw_score * config["title_keyword_weight"], max_title_score)
     abstract_score = min(
-        abstract_keywords * config["abstract_keyword_weight"], max_abstract_score
+        abstract_kw_score * config["abstract_keyword_weight"], max_abstract_score
     )
     content_score = min(
-        content_keywords * config["content_keyword_weight"], max_content_score
+        content_kw_score * config["content_keyword_weight"], max_content_score
     )
 
     score += title_score + abstract_score + content_score
@@ -112,11 +113,12 @@ def calculate_paper_score(paper, config):
         "abstract": round(abstract_score, 2),
         "content": round(content_score, 2),
     }
+    score_breakdown["keywords_matched"] = sorted(set(title_matched + abstract_matched))
 
     # Exclusion list
-    exclusion_count = count_keywords(content, config["exclusion_keywords"])
+    exclusion_score_raw, _ = count_keywords(content, config["exclusion_keywords"])
     exclusion_score = min(
-        exclusion_count * config["exclusion_keyword_penalty"], max_content_score
+        exclusion_score_raw * config["exclusion_keyword_penalty"], max_content_score
     )
     score -= exclusion_score
     score_breakdown["exclusion_penalty"] = -round(exclusion_score, 2)
@@ -140,11 +142,18 @@ def count_keywords(text, keywords):
         keywords: List of keywords to count.
 
     Returns:
-        Dictionary mapping keywords to their occurrence counts.
+        Tuple of (score, matched_list) where score is a float and matched_list
+        contains the keywords that were found.
     """
-    return sum(
-        math.log(text.lower().count(keyword.lower()) + 1) for keyword in keywords
-    )
+    text_lower = text.lower()
+    matched = []
+    score = 0.0
+    for keyword in keywords:
+        count = text_lower.count(keyword.lower())
+        if count > 0:
+            matched.append(keyword)
+            score += math.log(count + 1)
+    return score, matched
 
 
 def count_important_words(text, important_words):

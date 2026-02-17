@@ -3,9 +3,6 @@
 from contextlib import contextmanager
 from typing import Any, Dict, Generator
 
-import psycopg
-from psycopg import Connection
-
 
 class DatabaseConnectionError(RuntimeError):
     """Raised when a configured database is unreachable."""
@@ -19,7 +16,7 @@ def is_db_enabled(config: Dict[str, Any]) -> bool:
 @contextmanager
 def connect_db(
     db_config: Dict[str, Any], autocommit: bool = False
-) -> Generator[Connection, None, None]:
+) -> Generator:
     """Create a database connection.
 
     Args:
@@ -30,6 +27,8 @@ def connect_db(
     Yields:
         A psycopg connection object.
     """
+    import psycopg
+
     conn = psycopg.connect(
         host=db_config["host"],
         port=db_config["port"],

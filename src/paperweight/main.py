@@ -26,6 +26,7 @@ from paperweight.notifier import (
     write_output,
 )
 from paperweight.processor import process_papers
+from paperweight.progress import ProgressReporter
 from paperweight.scraper import get_recent_papers, hydrate_papers_with_content
 from paperweight.storage import (
     create_run,
@@ -45,12 +46,6 @@ MINIMAL_CONFIG_TEMPLATE = """arxiv:
     - cs.CL
   max_results: 50
 
-triage:
-  enabled: true
-  llm_provider: openai
-  min_score: 60
-  max_selected: 25
-
 processor:
   keywords:
     - transformer
@@ -63,21 +58,29 @@ processor:
   content_keyword_weight: 1
   exclusion_keyword_penalty: 5
   important_words_weight: 0.5
-  min_score: 10
+  min_score: 3
 
 analyzer:
   type: abstract
-  llm_provider: openai
   max_input_tokens: 7000
   max_input_chars: 20000
 
+metadata_cache:
+  enabled: true
+  path: .paperweight_cache.json
+  ttl_hours: 4
+
+concurrency:
+  content_fetch: 6
+  triage: 3
+  summary: 3
+
 logging:
   level: INFO
-  file: paperweight.log
 """
 
 
-def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml"):
+def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml", profile=None):
     """Set up the application and fetch papers.
 
     Args:
@@ -88,7 +91,7 @@ def setup_and_get_papers(force_refresh, include_content=True, config_path="confi
         Tuple of (papers, config) where papers is a list of paper dictionaries and
         config is the loaded configuration dictionary.
     """
-    config = load_config(config_path=config_path)
+    config = load_config(config_path=config_path, profile=profile)
     setup_logging(config["logging"])
     logger.info("Configuration loaded successfully")
 
@@ -121,8 +124,58 @@ def get_summary_model(config):
     return None
 
 
+def score_papers(papers, config):
+    """Score papers based on configured criteria (title + abstract keywords).
+
+    Args:
+        papers: List of paper dictionaries to score.
+        config: Configuration dictionary containing processing parameters.
+
+    Returns:
+        List of scored papers above the min_score threshold, or None if empty.
+    """
+    if not papers:
+        logger.info("No new papers to process. Exiting.")
+        return None
+
+    processed_papers = process_papers(papers, config["processor"])
+    logger.info(f"Scored {len(processed_papers)} papers above threshold")
+
+    if not processed_papers:
+        logger.info("No papers met the relevance criteria. Exiting.")
+        return None
+
+    return processed_papers
+
+
+def summarize_scored_papers(processed_papers, config):
+    """Attach summaries to already-scored papers.
+
+    Args:
+        processed_papers: List of scored paper dictionaries.
+        config: Configuration dictionary.
+
+    Returns:
+        The same list with ``summary`` field attached, or None if input is empty.
+    """
+    if not processed_papers:
+        return None
+
+    summary_concurrency = config.get("concurrency", {}).get("summary")
+    summaries = get_abstracts(processed_papers, config["analyzer"], summary_concurrency=summary_concurrency)
+    for paper, summary in zip(processed_papers, summaries):
+        paper["summary"] = (
+            summary if summary else paper.get("abstract", "No summary available")
+        )
+
+    return processed_papers
+
+
 def process_and_summarize_papers(recent_papers, config):
     """Process and analyze papers based on configured criteria.
+
+    Convenience wrapper that scores then summarizes in one call.
+    Retained for backward compatibility.
 
     Args:
         recent_papers: List of paper dictionaries to process.
@@ -131,24 +184,10 @@ def process_and_summarize_papers(recent_papers, config):
     Returns:
         List of processed papers with relevance scores and summaries.
     """
-    if not recent_papers:
-        logger.info("No new papers to process. Exiting.")
+    scored = score_papers(recent_papers, config)
+    if scored is None:
         return None
-
-    processed_papers = process_papers(recent_papers, config["processor"])
-    logger.info(f"Processed {len(processed_papers)} papers")
-
-    if not processed_papers:
-        logger.info("No papers met the relevance criteria. Exiting.")
-        return None
-
-    summaries = get_abstracts(processed_papers, config["analyzer"])
-    for paper, summary in zip(processed_papers, summaries):
-        paper["summary"] = (
-            summary if summary else paper.get("abstract", "No summary available")
-        )
-
-    return processed_papers
+    return summarize_scored_papers(scored, config)
 
 
 def _initialize_db_run(config, recent_papers):
@@ -246,9 +285,6 @@ def _handle_error(error, error_type):
 
 def _deliver_output(processed_papers, config, args):
     """Deliver processed papers via the requested adapter."""
-    if args.max_items and args.max_items > 0:
-        processed_papers = processed_papers[: args.max_items]
-
     if args.delivery == "stdout":
         digest = render_text_digest(processed_papers, sort_order=args.sort_order)
         write_output(digest, args.output)
@@ -324,13 +360,29 @@ def _add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--max-items",
         type=int,
         default=0,
-        help="Optional cap on number of delivered papers (0 = no cap)",
+        help="Optional cap on papers to process and deliver (0 = no cap)",
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Activate a named profile from the config's profiles section",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress status lines on stderr",
     )
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="paperweight: Fetch, triage, and summarize arXiv papers"
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"paperweight {get_package_version()}",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -360,6 +412,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return non-zero if any warnings are present",
     )
+    doctor_parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Activate a named profile from the config's profiles section",
+    )
 
     return parser
 
@@ -370,11 +428,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Backward-compatible default: `paperweight [run-args]` == `paperweight run [run-args]`
     known_commands = {"run", "init", "doctor"}
-    if args_list and args_list[0] in {"-h", "--help"}:
+    if args_list and args_list[0] in {"-h", "--help", "--version"}:
         return parser.parse_args(args_list)
     if args_list and args_list[0] in known_commands:
         return parser.parse_args(args_list)
 
+    # TODO: simplify — the fallback parser duplicates _build_cli_parser's run
+    # arguments. Consider using parser.parse_known_args() or inserting "run"
+    # into args_list when no known subcommand is found.
     run_parser = argparse.ArgumentParser(
         description="paperweight: Fetch, triage, and summarize arXiv papers"
     )
@@ -399,7 +460,7 @@ def _write_minimal_config(path: str, force: bool = False) -> None:
     print(f"Wrote config: {target}")
 
 
-def _doctor(config_path: str, strict: bool = False) -> int:
+def _doctor(config_path: str, strict: bool = False, profile: str | None = None) -> int:
     results: list[tuple[str, str, str]] = []
 
     config_file = Path(config_path)
@@ -411,15 +472,19 @@ def _doctor(config_path: str, strict: bool = False) -> int:
         return 1
 
     try:
-        config = load_config(config_path=config_path)
+        config = load_config(config_path=config_path, profile=profile)
         results.append(("OK", "config parse", "Loaded and validated"))
     except Exception as e:
         results.append(("FAIL", "config parse", str(e)))
         _print_doctor(results)
         return 1
 
+    active_profile = config.get("active_profile")
+    if active_profile:
+        results.append(("OK", "profile", active_profile))
+
     triage_cfg = config.get("triage", {})
-    triage_enabled = triage_cfg.get("enabled", True)
+    triage_enabled = triage_cfg.get("enabled", False)
     triage_provider = (
         triage_cfg.get("llm_provider")
         or config.get("analyzer", {}).get("llm_provider")
@@ -458,7 +523,7 @@ def _print_doctor(results: list[tuple[str, str, str]]) -> None:
         print(f"[{status}] {check}: {detail}")
 
 
-def _run_pipeline(args: argparse.Namespace) -> int:
+def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
     config = None
     run_id = None
     paper_id_map = {}
@@ -467,25 +532,82 @@ def _run_pipeline(args: argparse.Namespace) -> int:
     db_enabled = False
     had_error = False
 
+    progress = ProgressReporter(quiet=getattr(args, "quiet", False))
+
     try:
+        # 1. Metadata (cached by default)
+        progress.phase("fetching metadata...")
         recent_papers, config = setup_and_get_papers(
             args.force_refresh,
             include_content=False,
             config_path=args.config,
+            profile=getattr(args, "profile", None),
         )
-        shortlisted_papers = _apply_triage_and_hydrate(recent_papers, config)
+        if args.max_items and args.max_items > 0 and len(recent_papers) > args.max_items:
+            logger.info(
+                "Applying max-items compute cap: processing first %s of %s fetched papers",
+                args.max_items,
+                len(recent_papers),
+            )
+            recent_papers = recent_papers[: args.max_items]
+
+        categories = config.get("arxiv", {}).get("categories", [])
+        progress.phase_end(
+            "fetching metadata...",
+            f"{len(recent_papers)} papers ({len(categories)} categories)",
+        )
+
+        # 2. Triage (title + abstract — no content needed)
+        progress.phase("triaging...")
+        triaged_papers = triage_papers(recent_papers, config)
+        if not triaged_papers:
+            logger.info("AI triage selected no papers. Exiting.")
+            triaged_papers = []
+        progress.phase_end("triaging...", f"{len(triaged_papers)}/{len(recent_papers)} selected")
+
+        # 3. Score (title + abstract keywords — no content needed)
+        progress.phase("scoring...")
+        scored_papers = score_papers(triaged_papers, config)
+        if not scored_papers and triaged_papers:
+            threshold = config.get("processor", {}).get("min_score", 0)
+            progress.phase_end(
+                "scoring...",
+                f"0/{len(triaged_papers)} above min_score ({threshold}) — "
+                "try adding keywords or lowering processor.min_score",
+            )
+        else:
+            progress.phase_end(
+                "scoring...",
+                f"{len(scored_papers)} papers above threshold" if scored_papers else "0 papers above threshold",
+            )
+
+        # 4. Hydrate ONLY if analyzer needs full content (summary mode)
+        if scored_papers and config.get("analyzer", {}).get("type") == "summary":
+            progress.phase("fetching content...")
+            scored_papers = hydrate_papers_with_content(scored_papers, config)
+            progress.phase_end("fetching content...", f"{len(scored_papers)} hydrated")
+
         db_enabled = is_db_enabled(config)
 
-        if db_enabled:
-            run_id, paper_id_map = _initialize_db_run(config, shortlisted_papers)
+        if db_enabled and scored_papers:
+            run_id, paper_id_map = _initialize_db_run(config, scored_papers)
 
-        processed_papers = process_and_summarize_papers(shortlisted_papers, config)
+        # 5. Summarize (abstract passthrough or LLM)
+        if scored_papers and config.get("analyzer", {}).get("type") == "summary":
+            progress.phase("summarizing...")
+        processed_papers = summarize_scored_papers(scored_papers, config)
+        if scored_papers and config.get("analyzer", {}).get("type") == "summary":
+            count = len(processed_papers) if processed_papers else 0
+            progress.phase_end("summarizing...", f"{count}/{len(scored_papers)} done")
 
         if db_enabled and run_id and processed_papers:
             _persist_results(config, run_id, processed_papers, paper_id_map)
 
         if processed_papers:
             _deliver_output(processed_papers, config, args)
+
+        delivered = len(processed_papers) if processed_papers else 0
+        progress.phase_end("done —", f"{delivered} papers delivered to stdout")
 
         run_status = "success"
     except (
@@ -519,15 +641,24 @@ def main(argv: list[str] | None = None) -> int:
         args.output = getattr(args, "output", None)
         args.sort_order = getattr(args, "sort_order", "relevance")
         args.max_items = getattr(args, "max_items", 0)
+        args.profile = getattr(args, "profile", None)
+        args.quiet = getattr(args, "quiet", False)
     if args.command == "init":
-        _write_minimal_config(args.config, force=args.force)
-        return 0
+        try:
+            _write_minimal_config(args.config, force=args.force)
+            return 0
+        except ValueError as exc:
+            print(f"paperweight init: {exc}", file=sys.stderr)
+            return 1
     if args.command == "doctor":
-        return _doctor(args.config, strict=getattr(args, "strict", False))
+        return _doctor(args.config, strict=getattr(args, "strict", False), profile=getattr(args, "profile", None))
     return _run_pipeline(args)
 
 
 if __name__ == "__main__":
+    # TODO: the broad except here is redundant with error handling inside
+    # main() / _run_pipeline(). Consider removing once all CLI paths
+    # return clean exit codes on error.
     try:
         sys.exit(main())
     except Exception as e:

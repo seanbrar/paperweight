@@ -5,6 +5,7 @@ import pytest
 
 from paperweight.db import DatabaseConnectionError
 from paperweight.scraper import (
+    _write_metadata_cache,
     extract_text_from_source,
     fetch_arxiv_papers,
     get_recent_papers,
@@ -142,7 +143,7 @@ def test_hydrate_papers_with_content(monkeypatch):
 
     monkeypatch.setattr(
         "paperweight.scraper.fetch_paper_contents",
-        lambda _ids: [("2401.12345", b"pdf-bytes", "pdf")],
+        lambda _ids, max_workers=6: [("2401.12345", b"pdf-bytes", "pdf")],
     )
     monkeypatch.setattr(
         "paperweight.scraper.extract_text_from_source", lambda _content, _method: "text"
@@ -177,4 +178,47 @@ def test_get_recent_papers_without_content(monkeypatch):
     papers = get_recent_papers(config, force_refresh=True, include_content=False)
     assert len(papers) == 1
     assert papers[0]["content"] == ""
+    fetch_content.assert_not_called()
+
+
+def test_get_recent_papers_uses_metadata_cache(tmp_path, monkeypatch):
+    """When metadata cache is enabled and fresh, skip arXiv API calls."""
+    cache_path = str(tmp_path / "cache.json")
+    config = {
+        "arxiv": {"categories": ["cs.AI"], "max_results": 2},
+        "db": {"enabled": False},
+        "metadata_cache": {"enabled": True, "path": cache_path, "ttl_hours": 4},
+    }
+    cached_papers = [
+        {
+            "title": "Cached Paper",
+            "link": "http://arxiv.org/abs/2401.99999",
+            "date": datetime(2024, 1, 15).date(),
+            "abstract": "Cached abstract",
+        }
+    ]
+
+    # Pre-populate the cache
+    from paperweight.scraper import _metadata_cache_key
+
+    key = _metadata_cache_key(config)
+    _write_metadata_cache(cache_path, key, cached_papers)
+
+    monkeypatch.setattr("paperweight.scraper.get_last_processed_date", lambda: None)
+    monkeypatch.setattr("paperweight.scraper.save_last_processed_date", lambda _d: None)
+
+    fetch_called = {"called": False}
+
+    def fake_fetch(_config, _days):
+        fetch_called["called"] = True
+        return []
+
+    monkeypatch.setattr("paperweight.scraper.fetch_recent_papers", fake_fetch)
+    fetch_content = MagicMock()
+    monkeypatch.setattr("paperweight.scraper.fetch_paper_contents", fetch_content)
+
+    papers = get_recent_papers(config, force_refresh=False, include_content=False)
+    assert len(papers) == 1
+    assert papers[0]["title"] == "Cached Paper"
+    assert not fetch_called["called"]
     fetch_content.assert_not_called()

@@ -32,7 +32,7 @@ def _write_config(tmp_path, *, triage_enabled=False):
             "min_score": 0,
         },
         "analyzer": {"type": "abstract"},
-        "logging": {"level": "INFO", "file": str(tmp_path / "paperweight.log")},
+        "logging": {"level": "INFO"},
     }
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -46,6 +46,10 @@ def _stub_scraper(monkeypatch):
             "link": "http://arxiv.org/abs/2401.12345",
             "date": date(2024, 1, 15),
             "abstract": "A paper about transformer-based agents.",
+            "authors": ["Alice Smith", "Bob Jones"],
+            "categories": ["cs.AI", "cs.CL"],
+            "pdf_url": "https://arxiv.org/pdf/2401.12345",
+            "id": "2401.12345",
         }
     ]
 
@@ -70,12 +74,20 @@ def _stub_scraper_two_papers(monkeypatch):
             "link": "http://arxiv.org/abs/2401.12345",
             "date": date(2024, 1, 15),
             "abstract": "A paper about transformer-based agents.",
+            "authors": ["Alice Smith", "Bob Jones"],
+            "categories": ["cs.AI", "cs.CL"],
+            "pdf_url": "https://arxiv.org/pdf/2401.12345",
+            "id": "2401.12345",
         },
         {
             "title": "Reasoning Models",
             "link": "http://arxiv.org/abs/2401.67890",
             "date": date(2024, 1, 14),
             "abstract": "A paper about reasoning models.",
+            "authors": ["Carol White"],
+            "categories": ["cs.AI"],
+            "pdf_url": "https://arxiv.org/pdf/2401.67890",
+            "id": "2401.67890",
         },
     ]
     monkeypatch.setattr(
@@ -106,6 +118,8 @@ def test_run_stdout_mode_smoke(tmp_path, monkeypatch, capsys):
     assert "paperweight digest" in out
     assert "Transformer Agents" in out
     assert "http://arxiv.org/abs/2401.12345" in out
+    assert "Authors: Alice Smith, Bob Jones" in out
+    assert "Matched: " in out
 
 
 def test_run_atom_output_smoke(tmp_path, monkeypatch):
@@ -167,3 +181,105 @@ def test_run_json_respects_max_items(tmp_path, monkeypatch):
     assert exit_code == 0
     payload = json_path.read_text(encoding="utf-8")
     assert payload.count('"title"') == 1
+
+
+def test_run_max_items_caps_metadata_before_triage(tmp_path, monkeypatch, capsys):
+    """--max-items caps papers before triage/scoring; abstract mode skips hydration."""
+    config_path = _write_config(tmp_path, triage_enabled=False)
+    _stub_scraper_two_papers(monkeypatch)
+
+    hydrate_called = {"called": False}
+
+    def fake_hydrate(papers, _config):
+        hydrate_called["called"] = True
+        return papers
+
+    monkeypatch.setattr("paperweight.main.hydrate_papers_with_content", fake_hydrate)
+
+    exit_code = main(
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--force-refresh",
+            "--delivery",
+            "stdout",
+            "--max-items",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    # Abstract mode should never hydrate
+    assert not hydrate_called["called"]
+    # Only 1 paper should be delivered
+    out = capsys.readouterr().out
+    assert out.count("Score:") == 1
+
+
+def test_run_json_includes_rich_fields(tmp_path, monkeypatch):
+    """JSON output includes arxiv_id, authors, categories, abstract, pdf_url, keywords_matched."""
+    config_path = _write_config(tmp_path, triage_enabled=False)
+    json_path = tmp_path / "digest.json"
+    _stub_scraper(monkeypatch)
+
+    exit_code = main(
+        [
+            "run",
+            "--config",
+            str(config_path),
+            "--force-refresh",
+            "--delivery",
+            "json",
+            "--output",
+            str(json_path),
+        ]
+    )
+    assert exit_code == 0
+
+    import json
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert len(payload) >= 1
+    record = payload[0]
+    assert "arxiv_id" in record
+    assert "authors" in record
+    assert "categories" in record
+    assert "abstract" in record
+    assert "pdf_url" in record
+    assert "keywords_matched" in record
+    assert record["authors"] == ["Alice Smith", "Bob Jones"]
+    assert record["categories"] == ["cs.AI", "cs.CL"]
+
+
+def test_zero_state_hint(tmp_path, monkeypatch, capsys):
+    """When 0 papers pass scoring, stderr shows a helpful hint."""
+    config = {
+        "arxiv": {"categories": ["cs.AI"], "max_results": 5},
+        "triage": {"enabled": False},
+        "processor": {
+            "keywords": ["zzz_nonexistent_keyword_zzz"],
+            "exclusion_keywords": [],
+            "important_words": [],
+            "title_keyword_weight": 3,
+            "abstract_keyword_weight": 2,
+            "content_keyword_weight": 1,
+            "exclusion_keyword_penalty": 5,
+            "important_words_weight": 0.5,
+            "min_score": 9999,
+        },
+        "analyzer": {"type": "abstract"},
+        "logging": {"level": "INFO"},
+    }
+    config_path = tmp_path / "config.yaml"
+
+    import yaml
+
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    _stub_scraper(monkeypatch)
+
+    exit_code = main(["run", "--config", str(config_path), "--force-refresh"])
+
+    stderr = capsys.readouterr().err
+    assert "min_score" in stderr
+    assert exit_code == 0

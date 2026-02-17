@@ -8,6 +8,8 @@ data/
 artifacts/
 .DS_Store
 .coverage
+.paperweight_cache.json
+*.bak
 
 # Build artifacts
 build/

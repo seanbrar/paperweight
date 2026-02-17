@@ -50,12 +50,30 @@ def render_text_digest(
     for idx, paper in enumerate(ordered, start=1):
         score = paper.get("relevance_score", paper.get("triage_score", 0.0))
         lines.append(f"{idx}. {paper.get('title', 'Untitled')}")
+
+        authors = paper.get("authors", [])
+        if authors:
+            display = ", ".join(authors[:3])
+            if len(authors) > 3:
+                display += f" +{len(authors) - 3} more"
+            lines.append(f"   Authors: {display}")
+
         lines.append(f"   Date: {_format_paper_date(paper)}")
         lines.append(f"   Score: {score:.2f}")
+
+        matched = paper.get("keywords_matched", [])
+        if matched:
+            lines.append(f"   Matched: {', '.join(matched)}")
+
         if paper.get("triage_rationale"):
             lines.append(f"   Why: {paper.get('triage_rationale')}")
         lines.append(f"   Link: {paper.get('link', '')}")
-        lines.append(f"   Summary: {(paper.get('summary') or '').strip()}")
+
+        summary = (paper.get("summary") or "").strip()
+        if not summary:
+            summary = (paper.get("abstract") or "").strip()
+        if summary:
+            lines.append(f"   Summary: {summary}")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -97,6 +115,14 @@ def render_atom_feed(
         ET.SubElement(entry, f"{{{ns}}}updated").text = updated
         if link:
             ET.SubElement(entry, f"{{{ns}}}link", {"href": link, "rel": "alternate"})
+
+        for author_name in paper.get("authors", []):
+            author_el = ET.SubElement(entry, f"{{{ns}}}author")
+            ET.SubElement(author_el, f"{{{ns}}}name").text = author_name
+
+        for cat in paper.get("categories", []):
+            ET.SubElement(entry, f"{{{ns}}}category", {"term": cat})
+
         ET.SubElement(entry, f"{{{ns}}}summary").text = summary
         ET.SubElement(entry, f"{{{ns}}}content", {"type": "text"}).text = (
             f"Score: {score:.2f}\nWhy: {rationale}\nLink: {link}\nSummary: {summary}"
@@ -113,16 +139,24 @@ def render_json_digest(
     ordered = _sort_papers(papers, sort_order)
     payload = []
     for paper in ordered:
-        payload.append(
-            {
-                "title": paper.get("title", "Untitled"),
-                "date": _format_paper_date(paper),
-                "score": paper.get("relevance_score", paper.get("triage_score", 0.0)),
-                "why": paper.get("triage_rationale", ""),
-                "link": paper.get("link", ""),
-                "summary": (paper.get("summary") or "").strip(),
-            }
-        )
+        record = {
+            "title": paper.get("title", "Untitled"),
+            "arxiv_id": paper.get("id", ""),
+            "authors": paper.get("authors", []),
+            "categories": paper.get("categories", []),
+            "published": _format_paper_date(paper),
+            "abstract": paper.get("abstract", ""),
+            "link": paper.get("link", ""),
+            "pdf_url": paper.get("pdf_url", ""),
+            "score": paper.get("relevance_score", paper.get("triage_score", 0.0)),
+            "keywords_matched": paper.get("keywords_matched", []),
+        }
+        if "triage_score" in paper:
+            record["triage_score"] = paper["triage_score"]
+            record["triage_rationale"] = paper.get("triage_rationale", "")
+        if paper.get("summary") and paper.get("summary") != paper.get("abstract"):
+            record["summary"] = paper["summary"]
+        payload.append(record)
     return json.dumps(payload, indent=2, ensure_ascii=True)
 
 

@@ -11,16 +11,36 @@ import json
 import logging
 import os
 import re
+from copy import deepcopy
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 
-import tiktoken
 import yaml
 from dotenv import load_dotenv
 
 LAST_PROCESSED_DATE_FILE = "last_processed_date.txt"
 DEFAULT_ARXIV_VERSION = "v0"
+
+DEFAULT_CONFIG = {
+    "arxiv": {"categories": [], "max_results": 50},
+    "processor": {
+        "keywords": [],
+        "exclusion_keywords": [],
+        "important_words": [],
+        "title_keyword_weight": 3,
+        "abstract_keyword_weight": 2,
+        "content_keyword_weight": 1,
+        "exclusion_keyword_penalty": 5,
+        "important_words_weight": 0.5,
+        "min_score": 3,
+    },
+    "analyzer": {"type": "abstract", "max_input_tokens": 7000, "max_input_chars": 20000},
+    "triage": {"enabled": False},
+    "logging": {"level": "INFO"},
+    "metadata_cache": {"enabled": True, "path": ".paperweight_cache.json", "ttl_hours": 4},
+    "concurrency": {"content_fetch": 6, "triage": 3, "summary": 3},
+}
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +102,29 @@ def override_with_env(config, *, _path=()):
     return config
 
 
-def load_config(config_path="config.yaml"):
+def _deep_merge_dicts(base, override):
+    """Recursively merge *override* into a deep copy of *base*."""
+    merged = deepcopy(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def apply_profile(config, profile_name):
+    """Apply a named profile on top of *config* and return the merged result."""
+    profiles = config.get("profiles", {})
+    if profile_name not in profiles:
+        raise ValueError(f"Unknown profile: '{profile_name}'")
+    overlay = profiles[profile_name]
+    merged = _deep_merge_dicts(config, overlay)
+    merged["active_profile"] = profile_name
+    return merged
+
+
+def load_config(config_path="config.yaml", profile=None):  # noqa: C901
     """Load and validate the application configuration.
 
     Args:
@@ -100,11 +142,20 @@ def load_config(config_path="config.yaml"):
         load_dotenv()
 
         with open(config_path, "r") as config_file:
-            config = yaml.safe_load(config_file)
-        if config is None:
+            raw_config = yaml.safe_load(config_file)
+        if raw_config is None:
             raise ValueError("Empty configuration file")
 
+        # Merge user YAML over DEFAULT_CONFIG so every key has a safe default
+        config = _deep_merge_dicts(DEFAULT_CONFIG, raw_config)
+
         config = expand_env_vars(config)
+
+        # Profile switching: CLI flag > env var > none
+        profile_name = profile or os.environ.get("PAPERWEIGHT_PROFILE")
+        if profile_name:
+            config = apply_profile(config, profile_name)
+
         config = override_with_env(config)
 
         # Handle API keys
@@ -120,8 +171,6 @@ def load_config(config_path="config.yaml"):
                 config["analyzer"]["api_key"] = api_key
             else:
                 raise ValueError(f"Missing API key for {llm_provider}")
-        else:
-            pass
 
         if "arxiv" in config and "max_results" in config["arxiv"]:
             config["arxiv"]["max_results"] = int(config["arxiv"]["max_results"])
@@ -171,6 +220,12 @@ def check_config(config):
             _check_db_section(config["db"])
         if "storage" in config:
             _check_storage_section(config["storage"])
+        if "metadata_cache" in config:
+            _check_metadata_cache_section(config["metadata_cache"])
+        if "concurrency" in config:
+            _check_concurrency_section(config["concurrency"])
+        if "profiles" in config:
+            _check_profiles_section(config["profiles"])
     except KeyError as e:
         raise ValueError(f"Missing required section or key: {e}")
 
@@ -320,6 +375,47 @@ def _check_storage_section(storage):
         raise ValueError("Missing required storage field: 'base_dir'")
 
 
+def _check_metadata_cache_section(mc):
+    """Validate the metadata_cache section of the configuration."""
+    if not isinstance(mc, dict):
+        raise ValueError("'metadata_cache' must be a mapping")
+    if "ttl_hours" in mc:
+        try:
+            val = int(mc["ttl_hours"])
+        except (TypeError, ValueError):
+            raise ValueError("'ttl_hours' in 'metadata_cache' must be a valid integer")
+        if val < 0:
+            raise ValueError("'ttl_hours' in 'metadata_cache' must be non-negative")
+
+
+def _check_concurrency_section(concurrency):
+    """Validate the concurrency section of the configuration."""
+    if not isinstance(concurrency, dict):
+        raise ValueError("'concurrency' must be a mapping")
+    limits = {
+        "content_fetch": (1, 20),
+        "triage": (1, 10),
+        "summary": (1, 10),
+    }
+    for key, (lo, hi) in limits.items():
+        if key in concurrency:
+            try:
+                val = int(concurrency[key])
+            except (TypeError, ValueError):
+                raise ValueError(f"'{key}' in 'concurrency' must be a valid integer")
+            if val < lo or val > hi:
+                raise ValueError(f"'{key}' in 'concurrency' must be between {lo} and {hi}")
+
+
+def _check_profiles_section(profiles):
+    """Validate the profiles section of the configuration."""
+    if not isinstance(profiles, dict):
+        raise ValueError("'profiles' must be a mapping")
+    for name, overlay in profiles.items():
+        if not isinstance(overlay, dict):
+            raise ValueError(f"Profile '{name}' must be a mapping")
+
+
 def is_valid_arxiv_category(category):
     """Check if an arXiv category string is valid.
 
@@ -373,6 +469,8 @@ def count_tokens(text):
     Returns:
         int: Number of tokens in the text.
     """
+    import tiktoken
+
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     return len(encoding.encode(text, allowed_special={"<|endoftext|>"}))
 

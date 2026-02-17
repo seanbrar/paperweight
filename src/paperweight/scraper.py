@@ -8,16 +8,16 @@ API interactions and various methods for processing paper content.
 import gzip
 import hashlib
 import io
+import json
 import logging
 import os
 import tarfile
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import arxiv
 import requests
-from pypdf import PdfReader
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -87,12 +87,17 @@ def fetch_arxiv_papers(
                 )
                 break
 
+            arxiv_id, _ = split_arxiv_id(result.entry_id)
             papers.append(
                 {
                     "title": result.title,
                     "link": result.entry_id,
                     "date": submitted_date,
                     "abstract": result.summary,
+                    "authors": [a.name for a in result.authors],
+                    "categories": list(result.categories),
+                    "pdf_url": result.pdf_url,
+                    "id": arxiv_id,
                 }
             )
 
@@ -129,34 +134,46 @@ def fetch_recent_papers(config, start_days=1):
 
     logger.info(f"Fetching papers from {start_date} to {end_date}")
 
-    all_papers = []
-    processed_ids = set()
-
-    for category in categories:
+    def _fetch_category(category):
         logger.info(f"Processing category: {category}")
         try:
-            papers = fetch_arxiv_papers(
+            return category, fetch_arxiv_papers(
                 category,
                 start_date,
                 max_results=max_results if max_results > 0 else None,
             )
-            new_papers = [
-                paper
-                for paper in papers
-                if paper["link"].split("/abs/")[-1] not in processed_ids
-            ]
-            processed_ids.update(
-                paper["link"].split("/abs/")[-1] for paper in new_papers
-            )
-
-            if max_results > 0:
-                new_papers = new_papers[:max_results]
-
-            all_papers.extend(new_papers)
-            logger.debug(f"Added {len(new_papers)} new papers from category {category}")
         except ValueError as ve:
             logger.error(f"Error fetching papers for category {category}: {ve}")
-            continue
+            return category, []
+
+    all_papers = []
+    processed_ids: set = set()
+
+    workers = min(len(categories), 4) if categories else 1
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_fetch_category, cat): cat for cat in categories}
+        # Collect in submission order for deterministic results
+        results_by_cat = {}
+        for future in as_completed(futures):
+            cat, papers = future.result()
+            results_by_cat[cat] = papers
+
+    for category in categories:
+        papers = results_by_cat.get(category, [])
+        new_papers = [
+            paper
+            for paper in papers
+            if paper["link"].split("/abs/")[-1] not in processed_ids
+        ]
+        processed_ids.update(
+            paper["link"].split("/abs/")[-1] for paper in new_papers
+        )
+
+        if max_results > 0:
+            new_papers = new_papers[:max_results]
+
+        all_papers.extend(new_papers)
+        logger.debug(f"Added {len(new_papers)} new papers from category {category}")
 
     logger.info(f"Fetched a total of {len(all_papers)} papers")
     return all_papers
@@ -218,6 +235,8 @@ def extract_text_from_pdf(pdf_content):
     Returns:
         Extracted text as a string.
     """
+    from pypdf import PdfReader
+
     pdf_file = io.BytesIO(pdf_content)
     pdf_reader = PdfReader(pdf_file)
     text = ""
@@ -271,37 +290,42 @@ def extract_text_from_source(content, method):
         return decompressed.decode("utf-8", errors="ignore")
 
 
-def fetch_paper_contents(paper_ids):
+def fetch_paper_contents(paper_ids, max_workers=6):
     """Fetch contents for multiple papers in parallel.
 
     Args:
         paper_ids: List of arXiv paper IDs to fetch.
+        max_workers: Maximum number of concurrent download threads.
 
     Returns:
-        Dictionary mapping paper IDs to their content.
+        List of (paper_id, content, method) tuples, in the same order as *paper_ids*.
     """
-    contents = []
     total_papers = len(paper_ids)
-    logger.info(f"Fetching content for {total_papers} papers")
-    for i, paper_id in enumerate(paper_ids):
+    logger.info(f"Fetching content for {total_papers} papers (workers={max_workers})")
+
+    results: List[Any] = [None] * total_papers
+    index_by_id = {pid: i for i, pid in enumerate(paper_ids)}
+
+    def _fetch(paper_id):
         try:
             content, method = fetch_paper_content(paper_id)
-            contents.append((paper_id, content, method))
+            return paper_id, content, method
         except Exception as e:
             logger.error(f"Error fetching content for paper ID {paper_id}: {e}")
-            contents.append((paper_id, None, None))
+            return paper_id, None, None
 
-        if (i + 1) % 4 == 0:
-            time.sleep(1)
-            logger.debug(
-                f"Processed {i + 1}/{total_papers} papers. Waiting 1 second..."
-            )
-
-        if (i + 1) % 20 == 0:
-            logger.info(f"Processed {i + 1}/{total_papers} papers")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch, pid): pid for pid in paper_ids}
+        completed = 0
+        for future in as_completed(futures):
+            paper_id, content, method = future.result()
+            results[index_by_id[paper_id]] = (paper_id, content, method)
+            completed += 1
+            if completed % 20 == 0:
+                logger.info(f"Fetched {completed}/{total_papers} papers")
 
     logger.info(f"Finished fetching content for all {total_papers} papers")
-    return contents
+    return results
 
 
 def _hydrate_papers_with_content(papers, config, db_enabled):
@@ -309,8 +333,9 @@ def _hydrate_papers_with_content(papers, config, db_enabled):
     if not papers:
         return []
 
+    max_workers = config.get("concurrency", {}).get("content_fetch", 6)
     paper_ids = [paper["link"].split("/abs/")[-1] for paper in papers]
-    contents = fetch_paper_contents(paper_ids)
+    contents = fetch_paper_contents(paper_ids, max_workers=max_workers)
 
     papers_with_content = []
     storage_base = config.get("storage", {}).get("base_dir", "data/artifacts")
@@ -344,7 +369,85 @@ def hydrate_papers_with_content(papers, config):
     return _hydrate_papers_with_content(papers, config, db_enabled)
 
 
-def get_recent_papers(config, force_refresh=False, include_content=True):
+def _int_setting(value, default, *, minimum=0):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+def _metadata_cache_options(config):
+    """Return (enabled, path, ttl_hours) from config['metadata_cache']."""
+    mc = config.get("metadata_cache", {})
+    enabled = mc.get("enabled", True)
+    path = mc.get("path", ".paperweight_cache.json")
+    ttl_hours = _int_setting(mc.get("ttl_hours"), 4, minimum=0)
+    return enabled, path, ttl_hours
+
+
+def _metadata_cache_key(config):
+    """Build a stable key from the parameters that affect which papers are fetched."""
+    cats = sorted(config.get("arxiv", {}).get("categories", []))
+    max_r = config.get("arxiv", {}).get("max_results", 0)
+    today = datetime.now().date().isoformat()
+    raw = f"{cats}|{max_r}|{today}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _serialize_metadata_papers(papers):
+    """Convert paper list to JSON-safe form (dates become ISO strings)."""
+    out = []
+    for p in papers:
+        rec = dict(p)
+        if isinstance(rec.get("date"), date):
+            rec["date"] = rec["date"].isoformat()
+        out.append(rec)
+    return out
+
+
+def _deserialize_metadata_papers(records):
+    """Restore paper list from JSON-safe form."""
+    out = []
+    for rec in records:
+        rec = dict(rec)
+        if isinstance(rec.get("date"), str):
+            rec["date"] = datetime.strptime(rec["date"], "%Y-%m-%d").date()
+        out.append(rec)
+    return out
+
+
+def _load_metadata_cache(cache_path, expected_key, ttl_hours):
+    """Return cached papers or None if cache is missing/stale/corrupt."""
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("key") != expected_key:
+            return None
+        written = datetime.fromisoformat(data["written_at"])
+        if (datetime.now() - written).total_seconds() > ttl_hours * 3600:
+            return None
+        return _deserialize_metadata_papers(data["papers"])
+    except (OSError, json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def _write_metadata_cache(cache_path, key, papers):
+    """Write paper metadata to the cache file."""
+    payload = {
+        "key": key,
+        "written_at": datetime.now().isoformat(),
+        "papers": _serialize_metadata_papers(papers),
+    }
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        logger.debug("Wrote metadata cache to %s (%d papers)", cache_path, len(papers))
+    except OSError as e:
+        logger.warning("Could not write metadata cache: %s", e)
+
+
+def get_recent_papers(config, force_refresh=False, include_content=True):  # noqa: C901
     """Get recent papers, either from cache or by fetching new ones.
 
     Args:
@@ -370,24 +473,37 @@ def get_recent_papers(config, force_refresh=False, include_content=True):
     current_date = datetime.now().date()
     logger.info(f"Current date: {current_date}")
 
-    if last_processed_date is None or force_refresh:
-        # If never run before, fetch papers from the last 7 days
-        days = 7
-        logger.info("First run detected. Fetching papers from the last 7 days.")
-    else:
-        days = (current_date - last_processed_date).days
-        if days == 0:
-            logger.info("Already processed papers for today. No new papers to fetch.")
-            return []
-        elif days > 7:
-            # If more than a week has passed, limit to 7 days to avoid overload
-            days = 7
-            logger.warning(
-                f"More than a week since last run. Limiting fetch to last {days} days."
-            )
+    # Metadata cache: check before computing days so same-day runs can hit cache
+    cache_enabled, cache_path, cache_ttl = _metadata_cache_options(config)
+    cache_key = _metadata_cache_key(config)
+    recent_papers = None
+    if cache_enabled and not force_refresh:
+        recent_papers = _load_metadata_cache(cache_path, cache_key, cache_ttl)
+        if recent_papers is not None:
+            logger.info("Loaded %d papers from metadata cache", len(recent_papers))
 
-    logger.info(f"Fetching papers for the last {days} days")
-    recent_papers = fetch_recent_papers(config, days)
+    if recent_papers is None:
+        if last_processed_date is None or force_refresh:
+            # If never run before, fetch papers from the last 7 days
+            days = 7
+            logger.info("First run detected. Fetching papers from the last 7 days.")
+        else:
+            days = (current_date - last_processed_date).days
+            if days == 0:
+                logger.info("Already processed papers for today. No new papers to fetch.")
+                return []
+            elif days > 7:
+                # If more than a week has passed, limit to 7 days to avoid overload
+                days = 7
+                logger.warning(
+                    f"More than a week since last run. Limiting fetch to last {days} days."
+                )
+
+        logger.info(f"Fetching papers for the last {days} days")
+        recent_papers = fetch_recent_papers(config, days)
+        if cache_enabled:
+            _write_metadata_cache(cache_path, cache_key, recent_papers)
+
     logger.info(f"Fetched {len(recent_papers)} recent papers")
 
     papers_result = recent_papers
@@ -396,11 +512,11 @@ def get_recent_papers(config, force_refresh=False, include_content=True):
     else:
         papers_result = []
         for paper in recent_papers:
-            paper_id = paper["link"].split("/abs/")[-1]
             paper_without_content = dict(paper)
+            if "id" not in paper_without_content:
+                paper_without_content["id"] = paper["link"].split("/abs/")[-1]
             paper_without_content.update(
                 {
-                    "id": paper_id,
                     "content": "",
                     "content_type": None,
                     "artifacts": [],

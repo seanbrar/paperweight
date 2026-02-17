@@ -15,11 +15,11 @@ def setup_logging(logging_config):
 
     Args:
         logging_config: Dictionary containing logging configuration parameters including
-                       'level' and 'file' settings.
+                       'level' and optional 'file' settings.
 
-    The function configures both file and console handlers with the following features:
+    The function configures handlers with the following features:
     - Console handler with WARNING and above levels
-    - File handler with the configured level (defaults to INFO)
+    - File handler with the configured level (defaults to INFO) when 'file' is set
     - Standard format: timestamp - logger_name - level - message
     - Automatic creation of log directory if it doesn't exist
     """
@@ -28,12 +28,30 @@ def setup_logging(logging_config):
     if logging_level not in valid_levels:
         logging_level = "INFO"
 
-    log_file = logging_config["file"]
-    log_dir = os.path.dirname(log_file)
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
+    log_file = logging_config.get("file")
 
-    logging_config = {
+    handlers = {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "level": "WARNING",
+        },
+    }
+    active_handlers = ["console"]
+
+    if log_file:
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        handlers["file"] = {
+            "class": "logging.FileHandler",
+            "filename": log_file,
+            "formatter": "standard",
+            "level": logging_level,
+        }
+        active_handlers.append("file")
+
+    dict_config = {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
@@ -42,25 +60,13 @@ def setup_logging(logging_config):
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "standard",
-                "level": "WARNING",
-            },
-            "file": {
-                "class": "logging.FileHandler",
-                "filename": log_file,
-                "formatter": "standard",
-                "level": logging_level,
-            },
-        },
+        "handlers": handlers,
         "root": {
-            "handlers": ["console", "file"],
+            "handlers": active_handlers,
             "level": logging_level,
         },
     }
-    logging.config.dictConfig(logging_config)
+    logging.config.dictConfig(dict_config)
 
     logging.getLogger().setLevel(logging_level)
 

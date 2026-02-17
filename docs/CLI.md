@@ -8,6 +8,10 @@ paperweight has three commands:
 
 `paperweight` is shorthand for `paperweight run`.
 
+Global flags:
+
+- `--version` — print version and exit
+
 ## run
 
 ```bash
@@ -17,7 +21,9 @@ paperweight run \
   [--delivery stdout|json|atom|email] \
   [--output PATH] \
   [--sort-order relevance|alphabetical|publication_time] \
-  [--max-items N]
+  [--max-items N] \
+  [--profile NAME] \
+  [--quiet]
 ```
 
 Behavior:
@@ -26,6 +32,9 @@ Behavior:
 - runs triage on title + abstract
 - hydrates full text only for shortlisted papers
 - scores/summarizes and delivers digest
+- `--max-items N` caps how many fetched papers enter processing (triage/hydration/summary); output may be fewer than `N` after filtering
+- `--profile NAME` activates a named profile from the config's `profiles` section (or set `PAPERWEIGHT_PROFILE` env var)
+- `--quiet` suppresses progress status lines on stderr
 
 Delivery modes:
 
@@ -34,14 +43,24 @@ Delivery modes:
 - `atom`: Atom feed XML
 - `email`: SMTP send via `notifier.email` config
 
-`json` fields:
+`json` fields (always present):
 
-- `title`
-- `date`
-- `score`
-- `why`
-- `link`
-- `summary`
+- `title` — paper title
+- `arxiv_id` — arXiv identifier
+- `authors` — list of author names
+- `categories` — list of arXiv categories
+- `published` — publication date (ISO format)
+- `abstract` — paper abstract
+- `link` — arXiv abstract URL
+- `pdf_url` — direct PDF URL
+- `score` — relevance score (float)
+- `keywords_matched` — list of matched keywords
+
+`json` fields (conditional):
+
+- `triage_score` — present when triage is enabled
+- `triage_rationale` — present when triage is enabled
+- `summary` — present when summary differs from abstract (i.e. LLM summarization was used)
 
 ## init
 
@@ -53,11 +72,12 @@ Behavior:
 
 - writes a minimal `config.yaml` template
 - refuses to overwrite unless `--force` is passed
+- prints a clean error message (no traceback) if config already exists
 
 ## doctor
 
 ```bash
-paperweight doctor [--config PATH] [--strict]
+paperweight doctor [--config PATH] [--strict] [--profile NAME]
 ```
 
 Checks:
@@ -71,3 +91,4 @@ Exit codes:
 
 - `0`: healthy (or warnings present without `--strict`)
 - `1`: hard failure, or warning in strict mode
+

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-15
+
+### Added
+- Profile switching via `--profile NAME` flag and `PAPERWEIGHT_PROFILE` env var
+- Metadata cache (`metadata_cache` config section) to skip repeated arXiv API calls within a TTL window
+- Progress logging during triage and summary LLM calls
+- Per-call LLM timeout (45 s) for triage and summary to prevent hanging runs
+- `--version` flag on the CLI
+- Public API surface: `paperweight.__version__`, `load_config`, `get_recent_papers`, `score_papers`, etc. re-exported from `__init__.py`
+
+### Changed
+- Triage now uses per-paper async calls (same pattern as summaries) instead of batch `run_many`
+- Triage rationale is compact: prompt asks for max 20 words, output is whitespace-normalized and truncated
+- `paperweight init` prints a clean error to stderr (no traceback) when config already exists; use `--force` to overwrite
+
 ## [0.2.0] - 2026-02-14
 
 ### Added
@@ -72,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Email notification system
 - YAML-based configuration
 
-[Unreleased]: https://github.com/seanbrar/paperweight/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/seanbrar/paperweight/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/seanbrar/paperweight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/seanbrar/paperweight/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/seanbrar/paperweight/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/seanbrar/paperweight/compare/v0.1.0...v0.1.1

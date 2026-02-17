@@ -19,26 +19,41 @@ processor:
   content_keyword_weight: 1
   exclusion_keyword_penalty: 5
   important_words_weight: 0.5
-  min_score: 10
+  min_score: 3
 
 analyzer:
   type: abstract  # summary | abstract
-  llm_provider: openai  # openai | gemini
+  # llm_provider: openai  # openai | gemini
   # api_key: ${OPENAI_API_KEY}
+  # model: gpt-5-mini
   max_input_tokens: 7000
   max_input_chars: 20000
 
-# AI-first shortlist gate (title + abstract)
-triage:
+# AI triage — opt-in. Uncomment and set enabled: true to use.
+# Requires an LLM provider and API key.
+# triage:
+#   enabled: true
+#   llm_provider: openai  # openai | gemini
+#   # api_key: ${OPENAI_API_KEY}
+#   # model: gpt-5-mini
+#   min_score: 60
+#   max_selected: 25
+
+# Metadata cache — avoids repeated arXiv API calls within the TTL window.
+metadata_cache:
   enabled: true
-  llm_provider: openai  # openai | gemini
-  # api_key: ${OPENAI_API_KEY}
-  min_score: 60
-  max_selected: 25
+  path: .paperweight_cache.json
+  ttl_hours: 4
 
 logging:
   level: INFO  # DEBUG | INFO | WARNING | ERROR
-  file: paperweight.log
+  # file: paperweight.log  # Omit for stderr-only logging
+
+# Concurrency limits for parallelized pipeline stages.
+concurrency:
+  content_fetch: 6   # 1-20, threads for paper content downloads
+  triage: 3           # 1-10, async LLM workers for triage
+  summary: 3          # 1-10, async LLM workers for summarization
 
 # Optional metadata for --delivery atom
 feed:
@@ -71,3 +86,17 @@ db:
 # Optional artifact storage path
 storage:
   base_dir: data/artifacts
+
+# Named profiles — activate with --profile NAME or PAPERWEIGHT_PROFILE env var.
+# Each profile is a partial config overlay that deep-merges on top of the base.
+# profiles:
+#   fast:
+#     arxiv:
+#       max_results: 20
+#     triage:
+#       max_selected: 10
+#   deep:
+#     arxiv:
+#       max_results: 200
+#     triage:
+#       max_selected: 50
