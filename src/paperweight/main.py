@@ -433,6 +433,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args_list and args_list[0] in known_commands:
         return parser.parse_args(args_list)
 
+    # TODO: simplify — the fallback parser duplicates _build_cli_parser's run
+    # arguments. Consider using parser.parse_known_args() or inserting "run"
+    # into args_list when no known subcommand is found.
     run_parser = argparse.ArgumentParser(
         description="paperweight: Fetch, triage, and summarize arXiv papers"
     )
@@ -653,6 +656,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # TODO: the broad except here is redundant with error handling inside
+    # main() / _run_pipeline(). Consider removing once all CLI paths
+    # return clean exit codes on error.
     try:
         sys.exit(main())
     except Exception as e:
