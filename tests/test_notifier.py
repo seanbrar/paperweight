@@ -57,6 +57,8 @@ def test_render_text_digest_deterministic():
             "link": "http://arxiv.org/abs/2",
             "relevance_score": 2.0,
             "triage_rationale": "Matched transformer + planning",
+            "authors": ["Alice", "Bob", "Carol", "Dave"],
+            "keywords_matched": ["transformer"],
         },
         {
             "title": "A Paper",
@@ -65,12 +67,18 @@ def test_render_text_digest_deterministic():
             "link": "http://arxiv.org/abs/1",
             "relevance_score": 1.0,
             "triage_rationale": "Matched profile keywords",
+            "authors": ["Eve"],
+            "keywords_matched": ["agent"],
         },
     ]
     digest = render_text_digest(papers, sort_order="alphabetical")
     assert "1. A Paper" in digest
     assert "2. B Paper" in digest
     assert "Why: Matched profile keywords" in digest
+    assert "Authors: Alice, Bob, Carol +1 more" in digest
+    assert "Authors: Eve" in digest
+    assert "Matched: transformer" in digest
+    assert "Matched: agent" in digest
 
 
 def test_render_atom_feed_contains_required_elements():
@@ -81,6 +89,8 @@ def test_render_atom_feed_contains_required_elements():
             "summary": "Summary text",
             "link": "http://arxiv.org/abs/2401.12345",
             "relevance_score": 5.5,
+            "authors": ["Alice Smith", "Bob Jones"],
+            "categories": ["cs.AI", "cs.CL"],
         }
     ]
     feed = render_atom_feed(papers)
@@ -89,6 +99,10 @@ def test_render_atom_feed_contains_required_elements():
     assert "<entry>" in feed
     assert "Test Paper" in feed
     assert "http://arxiv.org/abs/2401.12345" in feed
+    assert "Alice Smith" in feed
+    assert "Bob Jones" in feed
+    assert 'term="cs.AI"' in feed
+    assert 'term="cs.CL"' in feed
 
 
 def test_write_output_to_file(tmp_path):
@@ -102,13 +116,32 @@ def test_render_json_digest_contains_expected_fields():
         {
             "title": "Test Paper",
             "date": date(2024, 1, 2),
+            "abstract": "An abstract about transformers.",
             "summary": "Summary text",
             "link": "http://arxiv.org/abs/2401.12345",
             "relevance_score": 5.5,
+            "triage_score": 85.0,
             "triage_rationale": "Matched core interests",
+            "id": "2401.12345",
+            "authors": ["Alice Smith"],
+            "categories": ["cs.AI"],
+            "pdf_url": "https://arxiv.org/pdf/2401.12345",
+            "keywords_matched": ["transformer"],
         }
     ]
+    import json
+
     payload = render_json_digest(papers)
-    assert '"title": "Test Paper"' in payload
-    assert '"why": "Matched core interests"' in payload
-    assert '"score": 5.5' in payload
+    data = json.loads(payload)
+    record = data[0]
+    assert record["title"] == "Test Paper"
+    assert record["arxiv_id"] == "2401.12345"
+    assert record["authors"] == ["Alice Smith"]
+    assert record["categories"] == ["cs.AI"]
+    assert record["pdf_url"] == "https://arxiv.org/pdf/2401.12345"
+    assert record["keywords_matched"] == ["transformer"]
+    assert record["score"] == 5.5
+    assert record["triage_score"] == 85.0
+    assert record["triage_rationale"] == "Matched core interests"
+    # summary differs from abstract, so it should appear
+    assert record["summary"] == "Summary text"

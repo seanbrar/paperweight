@@ -8,6 +8,7 @@ import pytest
 
 from paperweight.processor import (
     calculate_paper_score,
+    count_keywords,
     normalize_scores,
     process_papers,
 )
@@ -78,6 +79,40 @@ class TestProcessPapers:
         """Empty paper list returns empty result."""
         result = process_papers([], processor_config)
         assert result == []
+
+
+class TestCountKeywords:
+    """Tests for the count_keywords function."""
+
+    def test_returns_tuple(self):
+        """count_keywords returns (score, matched_list) tuple."""
+        score, matched = count_keywords("AI in healthcare", ["AI", "healthcare"])
+        assert score > 0
+        assert set(matched) == {"AI", "healthcare"}
+
+    def test_no_matches_returns_empty(self):
+        """count_keywords with no matches returns zero score and empty list."""
+        score, matched = count_keywords("nothing relevant here", ["quantum"])
+        assert score == 0.0
+        assert matched == []
+
+
+class TestKeywordsMatched:
+    """Tests for keywords_matched propagation in process_papers."""
+
+    def test_keywords_matched_in_scored_papers(self, processor_config):
+        """Scored papers include keywords_matched field."""
+        papers = [
+            {
+                "title": "AI in Healthcare",
+                "abstract": "This paper discusses AI applications in healthcare.",
+                "content": "",
+            }
+        ]
+        processed = process_papers(papers, processor_config)
+        assert len(processed) >= 1
+        assert "keywords_matched" in processed[0]
+        assert "AI" in processed[0]["keywords_matched"]
 
 
 class TestNormalizeScores:

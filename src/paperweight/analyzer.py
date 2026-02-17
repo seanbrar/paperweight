@@ -10,8 +10,6 @@ import logging
 import os
 from typing import Any, Dict, List, Literal, cast
 
-from pollux import Config, RetryPolicy, Source, run
-
 from paperweight.utils import count_tokens
 
 ProviderName = Literal["gemini", "openai"]
@@ -195,6 +193,8 @@ def _parse_triage_decision(response: Any, *, min_score: float) -> Dict[str, Any]
 
 async def _triage_one_paper_async(prompt, pollux_config, *, min_score):
     """Call `run` for a single triage prompt with a timeout."""
+    from pollux import run
+
     result = await asyncio.wait_for(
         run(prompt, config=pollux_config), timeout=LLM_TIMEOUT_S
     )
@@ -239,8 +239,10 @@ def triage_papers(
         return []
 
     triage_cfg = full_config.get("triage", {})
-    if not triage_cfg.get("enabled", True):
+    if not triage_cfg.get("enabled", False):
         return papers
+
+    from pollux import Config, RetryPolicy
 
     provider, model, api_key, min_score, max_selected = _resolve_triage_model_config(
         full_config
@@ -307,11 +309,13 @@ def triage_papers(
 
 async def _summarize_one_paper_async(
     paper: Dict[str, Any],
-    pollux_config: Config,
+    pollux_config: Any,
     *,
     max_input_tokens: int,
     max_input_chars: int,
 ) -> str:
+    from pollux import Source, run
+
     title = (paper.get("title") or "").strip()
     abstract = (paper.get("abstract") or "").strip()
     content = paper.get("content") or ""
@@ -375,6 +379,8 @@ def summarize_papers(  # noqa: C901
     """Summarize papers with abstract fallback on runtime LLM errors."""
     if not papers:
         return []
+
+    from pollux import Config, RetryPolicy
 
     provider, model_name, api_key = _resolve_summary_model_config(config)
     max_input_tokens = _int_setting(config.get("max_input_tokens"), 7000, minimum=500)

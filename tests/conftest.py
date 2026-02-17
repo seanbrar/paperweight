@@ -102,9 +102,11 @@ def base_test_config(tmp_path: Path) -> Dict[str, Any]:
                 "use_auth": False,
             }
         },
+        "triage": {
+            "enabled": False,
+        },
         "logging": {
             "level": "DEBUG",
-            "file": str(tmp_path / "test_paperweight.log"),
         },
         "db": {
             "enabled": False,

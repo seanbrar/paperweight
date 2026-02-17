@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from paperweight.utils import (
+    DEFAULT_CONFIG,
     _check_arxiv_section,
     apply_profile,
     check_config,
@@ -367,3 +368,43 @@ class TestProfiles:
             result = load_config(config_path=str(config_path), profile="fast")
         assert result["arxiv"]["max_results"] == 10
         assert result["active_profile"] == "fast"
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_CONFIG Merge Tests
+# ---------------------------------------------------------------------------
+
+class TestDefaultConfigMerge:
+    """Tests for DEFAULT_CONFIG merge behavior in load_config."""
+
+    def test_minimal_config_loads_without_crash(self, tmp_path):
+        """A config with only arxiv.categories loads successfully via DEFAULT_CONFIG merge."""
+        cfg = {"arxiv": {"categories": ["cs.AI"]}}
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=False):
+            result = load_config(config_path=str(config_path))
+        assert result["analyzer"]["type"] == "abstract"
+        assert result["processor"]["min_score"] == 3
+        assert result["triage"]["enabled"] is False
+        assert result["logging"]["level"] == "INFO"
+        assert "file" not in result["logging"]
+
+    def test_default_config_has_triage_disabled(self):
+        """DEFAULT_CONFIG has triage.enabled set to False."""
+        assert DEFAULT_CONFIG["triage"]["enabled"] is False
+
+    def test_user_config_overrides_defaults(self, tmp_path):
+        """User config values override DEFAULT_CONFIG."""
+        cfg = {
+            "arxiv": {"categories": ["cs.AI"]},
+            "processor": {"min_score": 10, "keywords": ["test"]},
+        }
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+        with patch.dict(os.environ, {}, clear=False):
+            result = load_config(config_path=str(config_path))
+        assert result["processor"]["min_score"] == 10
+        assert result["processor"]["keywords"] == ["test"]
+        # Defaults still fill in missing keys
+        assert result["processor"]["title_keyword_weight"] == 3

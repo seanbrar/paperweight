@@ -10,7 +10,7 @@ from paperweight.db import connect_db
 class TestConnectDb:
     """Tests for connect_db context manager."""
 
-    @patch("paperweight.db.psycopg.connect")
+    @patch("psycopg.connect")
     def test_connect_db_basic(self, mock_connect):
         """Test basic database connection."""
         mock_conn = MagicMock()
@@ -39,7 +39,7 @@ class TestConnectDb:
         )
         mock_conn.close.assert_called_once()
 
-    @patch("paperweight.db.psycopg.connect")
+    @patch("psycopg.connect")
     def test_connect_db_autocommit(self, mock_connect):
         """Test database connection with autocommit enabled."""
         mock_conn = MagicMock()
@@ -60,7 +60,7 @@ class TestConnectDb:
         call_kwargs = mock_connect.call_args[1]
         assert call_kwargs["autocommit"] is True
 
-    @patch("paperweight.db.psycopg.connect")
+    @patch("psycopg.connect")
     def test_connect_db_default_sslmode(self, mock_connect):
         """Test that sslmode defaults to 'prefer' when not specified."""
         mock_conn = MagicMock()
@@ -80,7 +80,7 @@ class TestConnectDb:
         call_kwargs = mock_connect.call_args[1]
         assert call_kwargs["sslmode"] == "prefer"
 
-    @patch("paperweight.db.psycopg.connect")
+    @patch("psycopg.connect")
     def test_connect_db_closes_on_exception(self, mock_connect):
         """Test that connection is closed even when an exception occurs."""
         mock_conn = MagicMock()

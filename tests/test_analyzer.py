@@ -18,7 +18,7 @@ class TestSummarizePaper:
         """Summarization returns model output with valid provider/key."""
         # Mock Pollux's async run() function
         mock_result = {"answers": ["This is a summary of the paper."], "status": "ok"}
-        mocker.patch("paperweight.analyzer.run", new=AsyncMock(return_value=mock_result))
+        mocker.patch("pollux.run", new=AsyncMock(return_value=mock_result))
 
         paper = {
             "title": "Test Paper",
@@ -48,7 +48,7 @@ class TestSummarizePaper:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
         mock_result = {"answers": ["This is a summary of the paper."], "status": "ok"}
-        mocker.patch("paperweight.analyzer.run", new=AsyncMock(return_value=mock_result))
+        mocker.patch("pollux.run", new=AsyncMock(return_value=mock_result))
 
         paper = {
             "title": "Test Paper",
@@ -65,7 +65,7 @@ class TestSummarizePaper:
             summarize_paper(paper, config)
 
     def test_summarize_falls_back_to_abstract_when_model_returns_no_answers(self, mocker):
-        mocker.patch("paperweight.analyzer.run", new=AsyncMock(return_value={"answers": []}))
+        mocker.patch("pollux.run", new=AsyncMock(return_value={"answers": []}))
 
         paper = {
             "title": "Test Paper",
@@ -97,7 +97,7 @@ class TestTriagePapers:
 
     def test_triage_uses_llm_decision(self, mocker):
         mocker.patch(
-            "paperweight.analyzer.run",
+            "pollux.run",
             new=AsyncMock(
                 return_value={
                     "answers": [
@@ -125,7 +125,7 @@ class TestTriagePapers:
 
     def test_triage_falls_back_for_entire_batch_when_llm_errors(self, mocker):
         mocker.patch(
-            "paperweight.analyzer.run",
+            "pollux.run",
             new=AsyncMock(side_effect=RuntimeError("provider unavailable")),
         )
         papers = [

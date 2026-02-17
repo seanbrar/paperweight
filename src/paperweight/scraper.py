@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional
 
 import arxiv
 import requests
-from pypdf import PdfReader
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -88,12 +87,17 @@ def fetch_arxiv_papers(
                 )
                 break
 
+            arxiv_id, _ = split_arxiv_id(result.entry_id)
             papers.append(
                 {
                     "title": result.title,
                     "link": result.entry_id,
                     "date": submitted_date,
                     "abstract": result.summary,
+                    "authors": [a.name for a in result.authors],
+                    "categories": list(result.categories),
+                    "pdf_url": result.pdf_url,
+                    "id": arxiv_id,
                 }
             )
 
@@ -130,34 +134,46 @@ def fetch_recent_papers(config, start_days=1):
 
     logger.info(f"Fetching papers from {start_date} to {end_date}")
 
-    all_papers = []
-    processed_ids = set()
-
-    for category in categories:
+    def _fetch_category(category):
         logger.info(f"Processing category: {category}")
         try:
-            papers = fetch_arxiv_papers(
+            return category, fetch_arxiv_papers(
                 category,
                 start_date,
                 max_results=max_results if max_results > 0 else None,
             )
-            new_papers = [
-                paper
-                for paper in papers
-                if paper["link"].split("/abs/")[-1] not in processed_ids
-            ]
-            processed_ids.update(
-                paper["link"].split("/abs/")[-1] for paper in new_papers
-            )
-
-            if max_results > 0:
-                new_papers = new_papers[:max_results]
-
-            all_papers.extend(new_papers)
-            logger.debug(f"Added {len(new_papers)} new papers from category {category}")
         except ValueError as ve:
             logger.error(f"Error fetching papers for category {category}: {ve}")
-            continue
+            return category, []
+
+    all_papers = []
+    processed_ids: set = set()
+
+    workers = min(len(categories), 4) if categories else 1
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_fetch_category, cat): cat for cat in categories}
+        # Collect in submission order for deterministic results
+        results_by_cat = {}
+        for future in as_completed(futures):
+            cat, papers = future.result()
+            results_by_cat[cat] = papers
+
+    for category in categories:
+        papers = results_by_cat.get(category, [])
+        new_papers = [
+            paper
+            for paper in papers
+            if paper["link"].split("/abs/")[-1] not in processed_ids
+        ]
+        processed_ids.update(
+            paper["link"].split("/abs/")[-1] for paper in new_papers
+        )
+
+        if max_results > 0:
+            new_papers = new_papers[:max_results]
+
+        all_papers.extend(new_papers)
+        logger.debug(f"Added {len(new_papers)} new papers from category {category}")
 
     logger.info(f"Fetched a total of {len(all_papers)} papers")
     return all_papers
@@ -219,6 +235,8 @@ def extract_text_from_pdf(pdf_content):
     Returns:
         Extracted text as a string.
     """
+    from pypdf import PdfReader
+
     pdf_file = io.BytesIO(pdf_content)
     pdf_reader = PdfReader(pdf_file)
     text = ""
@@ -494,11 +512,11 @@ def get_recent_papers(config, force_refresh=False, include_content=True):  # noq
     else:
         papers_result = []
         for paper in recent_papers:
-            paper_id = paper["link"].split("/abs/")[-1]
             paper_without_content = dict(paper)
+            if "id" not in paper_without_content:
+                paper_without_content["id"] = paper["link"].split("/abs/")[-1]
             paper_without_content.update(
                 {
-                    "id": paper_id,
                     "content": "",
                     "content_type": None,
                     "artifacts": [],

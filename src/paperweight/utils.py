@@ -16,12 +16,31 @@ from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 
-import tiktoken
 import yaml
 from dotenv import load_dotenv
 
 LAST_PROCESSED_DATE_FILE = "last_processed_date.txt"
 DEFAULT_ARXIV_VERSION = "v0"
+
+DEFAULT_CONFIG = {
+    "arxiv": {"categories": [], "max_results": 50},
+    "processor": {
+        "keywords": [],
+        "exclusion_keywords": [],
+        "important_words": [],
+        "title_keyword_weight": 3,
+        "abstract_keyword_weight": 2,
+        "content_keyword_weight": 1,
+        "exclusion_keyword_penalty": 5,
+        "important_words_weight": 0.5,
+        "min_score": 3,
+    },
+    "analyzer": {"type": "abstract", "max_input_tokens": 7000, "max_input_chars": 20000},
+    "triage": {"enabled": False},
+    "logging": {"level": "INFO"},
+    "metadata_cache": {"enabled": True, "path": ".paperweight_cache.json", "ttl_hours": 4},
+    "concurrency": {"content_fetch": 6, "triage": 3, "summary": 3},
+}
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +142,12 @@ def load_config(config_path="config.yaml", profile=None):  # noqa: C901
         load_dotenv()
 
         with open(config_path, "r") as config_file:
-            config = yaml.safe_load(config_file)
-        if config is None:
+            raw_config = yaml.safe_load(config_file)
+        if raw_config is None:
             raise ValueError("Empty configuration file")
+
+        # Merge user YAML over DEFAULT_CONFIG so every key has a safe default
+        config = _deep_merge_dicts(DEFAULT_CONFIG, raw_config)
 
         config = expand_env_vars(config)
 
@@ -149,8 +171,6 @@ def load_config(config_path="config.yaml", profile=None):  # noqa: C901
                 config["analyzer"]["api_key"] = api_key
             else:
                 raise ValueError(f"Missing API key for {llm_provider}")
-        else:
-            pass
 
         if "arxiv" in config and "max_results" in config["arxiv"]:
             config["arxiv"]["max_results"] = int(config["arxiv"]["max_results"])
@@ -449,6 +469,8 @@ def count_tokens(text):
     Returns:
         int: Number of tokens in the text.
     """
+    import tiktoken
+
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     return len(encoding.encode(text, allowed_special={"<|endoftext|>"}))
 
