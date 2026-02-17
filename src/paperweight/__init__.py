@@ -15,11 +15,12 @@ from paperweight.main import (  # noqa: E402
     setup_and_get_papers,
     summarize_scored_papers,
 )
-from paperweight.scraper import get_recent_papers  # noqa: E402
+from paperweight.scraper import ArxivRateLimitError, get_recent_papers  # noqa: E402
 from paperweight.utils import load_config  # noqa: E402
 
 __all__ = [
     "__version__",
+    "ArxivRateLimitError",
     "get_recent_papers",
     "load_config",
     "process_and_summarize_papers",

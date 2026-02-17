@@ -27,7 +27,11 @@ from paperweight.notifier import (
 )
 from paperweight.processor import process_papers
 from paperweight.progress import ProgressReporter
-from paperweight.scraper import get_recent_papers, hydrate_papers_with_content
+from paperweight.scraper import (
+    ArxivRateLimitError,
+    get_recent_papers,
+    hydrate_papers_with_content,
+)
 from paperweight.storage import (
     create_run,
     finish_run,
@@ -80,7 +84,9 @@ logging:
 """
 
 
-def setup_and_get_papers(force_refresh, include_content=True, config_path="config.yaml", profile=None):
+def setup_and_get_papers(
+    force_refresh, include_content=True, config_path="config.yaml", profile=None
+):
     """Set up the application and fetch papers.
 
     Args:
@@ -162,7 +168,9 @@ def summarize_scored_papers(processed_papers, config):
         return None
 
     summary_concurrency = config.get("concurrency", {}).get("summary")
-    summaries = get_abstracts(processed_papers, config["analyzer"], summary_concurrency=summary_concurrency)
+    summaries = get_abstracts(
+        processed_papers, config["analyzer"], summary_concurrency=summary_concurrency
+    )
     for paper, summary in zip(processed_papers, summaries):
         paper["summary"] = (
             summary if summary else paper.get("abstract", "No summary available")
@@ -256,6 +264,8 @@ def _get_error_message(error):
     Returns:
         Human-readable error description string.
     """
+    if isinstance(error, ArxivRateLimitError):
+        return str(error)
     if isinstance(error, requests.RequestException):
         return "Network error occurred"
     if isinstance(error, yaml.YAMLError):
@@ -302,7 +312,9 @@ def _deliver_output(processed_papers, config, args):
             sort_order=args.sort_order,
             feed_title=feed_config.get("title", "paperweight"),
             feed_id=feed_config.get("id", "https://github.com/seanbrar/paperweight"),
-            feed_link=feed_config.get("link", "https://github.com/seanbrar/paperweight"),
+            feed_link=feed_config.get(
+                "link", "https://github.com/seanbrar/paperweight"
+            ),
         )
         write_output(feed_xml, args.output)
         return
@@ -311,7 +323,9 @@ def _deliver_output(processed_papers, config, args):
     if not notifier_config:
         raise ValueError("Email delivery requested but notifier config is missing.")
 
-    notification_sent = compile_and_send_notifications(processed_papers, notifier_config)
+    notification_sent = compile_and_send_notifications(
+        processed_papers, notifier_config
+    )
     if notification_sent:
         logger.info("Notifications compiled and sent successfully")
     else:
@@ -448,7 +462,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _write_minimal_config(path: str, force: bool = False) -> None:
     target = Path(path)
     if target.exists() and not force:
-        raise ValueError(f"Config file already exists: {target}. Use --force to overwrite.")
+        raise ValueError(
+            f"Config file already exists: {target}. Use --force to overwrite."
+        )
 
     base_template = Path("config-base.yaml")
     content = (
@@ -543,7 +559,11 @@ def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
             config_path=args.config,
             profile=getattr(args, "profile", None),
         )
-        if args.max_items and args.max_items > 0 and len(recent_papers) > args.max_items:
+        if (
+            args.max_items
+            and args.max_items > 0
+            and len(recent_papers) > args.max_items
+        ):
             logger.info(
                 "Applying max-items compute cap: processing first %s of %s fetched papers",
                 args.max_items,
@@ -563,7 +583,9 @@ def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
         if not triaged_papers:
             logger.info("AI triage selected no papers. Exiting.")
             triaged_papers = []
-        progress.phase_end("triaging...", f"{len(triaged_papers)}/{len(recent_papers)} selected")
+        progress.phase_end(
+            "triaging...", f"{len(triaged_papers)}/{len(recent_papers)} selected"
+        )
 
         # 3. Score (title + abstract keywords — no content needed)
         progress.phase("scoring...")
@@ -578,7 +600,9 @@ def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
         else:
             progress.phase_end(
                 "scoring...",
-                f"{len(scored_papers)} papers above threshold" if scored_papers else "0 papers above threshold",
+                f"{len(scored_papers)} papers above threshold"
+                if scored_papers
+                else "0 papers above threshold",
             )
 
         # 4. Hydrate ONLY if analyzer needs full content (summary mode)
@@ -611,6 +635,7 @@ def _run_pipeline(args: argparse.Namespace) -> int:  # noqa: C901
 
         run_status = "success"
     except (
+        ArxivRateLimitError,
         requests.RequestException,
         yaml.YAMLError,
         KeyError,
@@ -651,7 +676,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"paperweight init: {exc}", file=sys.stderr)
             return 1
     if args.command == "doctor":
-        return _doctor(args.config, strict=getattr(args, "strict", False), profile=getattr(args, "profile", None))
+        return _doctor(
+            args.config,
+            strict=getattr(args, "strict", False),
+            profile=getattr(args, "profile", None),
+        )
     return _run_pipeline(args)
 
 

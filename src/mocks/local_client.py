@@ -20,8 +20,7 @@ DEFAULT_FILES_DIR = DEFAULT_MIRROR_PATH / "files"
 
 
 def mock_fetch_paper_content(
-    paper_id: str,
-    files_dir: Path = DEFAULT_FILES_DIR
+    paper_id: str, files_dir: Path = DEFAULT_FILES_DIR
 ) -> Tuple[Optional[bytes], Optional[str]]:
     """Mock replacement for paperweight.scraper.fetch_paper_content.
 
@@ -37,7 +36,7 @@ def mock_fetch_paper_content(
         or (None, None) if no file found.
     """
     # Normalize paper_id - strip version if present for base lookup
-    base_id = paper_id.split('v')[0] if 'v' in paper_id else paper_id
+    base_id = paper_id.split("v")[0] if "v" in paper_id else paper_id
 
     # Try different ID patterns (with/without version)
     id_patterns = [paper_id]
@@ -48,7 +47,7 @@ def mock_fetch_paper_content(
     if paper_id == base_id:
         # Look for any versioned file
         for f in files_dir.glob(f"{base_id}v*.tar.gz"):
-            id_patterns.insert(0, f.stem.replace('.tar', ''))
+            id_patterns.insert(0, f.stem.replace(".tar", ""))
             break
         for f in files_dir.glob(f"{base_id}v*.pdf"):
             if f.stem not in id_patterns:
@@ -70,17 +69,17 @@ def mock_fetch_paper_content(
 
 
 def mock_fetch_arxiv_papers(
-    category: str,
+    categories: List[str],
     start_date: Any,
     max_results: Optional[int] = None,
-    db_path: Path = DEFAULT_DB_PATH
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> List[Dict[str, Any]]:
     """Mock replacement for paperweight.scraper.fetch_arxiv_papers.
 
     Reads paper metadata from local SQLite database instead of arXiv API.
 
     Args:
-        category: The arXiv category to filter by (e.g., "cs.AI")
+        categories: arXiv categories to filter by (e.g., ``['cs.AI', 'cs.CL']``)
         start_date: Not used in mock (we return all matching papers)
         max_results: Maximum number of results to return
         db_path: Path to the SQLite database
@@ -95,8 +94,10 @@ def mock_fetch_arxiv_papers(
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    sql = "SELECT * FROM papers WHERE categories LIKE ?"
-    params: List[Any] = [f"%{category}%"]
+    # Build category filter with OR logic
+    cat_conditions = " OR ".join(["categories LIKE ?" for _ in categories])
+    sql = f"SELECT * FROM papers WHERE ({cat_conditions})"
+    params: List[Any] = [f"%{cat}%" for cat in categories]
 
     if max_results:
         sql += " LIMIT ?"
@@ -107,12 +108,14 @@ def mock_fetch_arxiv_papers(
 
     papers = []
     for row in rows:
-        papers.append({
-            "title": row["title"],
-            "link": f"http://arxiv.org/abs/{row['id']}",
-            "date": datetime.fromisoformat(row["published"]).date(),
-            "abstract": row["abstract"],
-        })
+        papers.append(
+            {
+                "title": row["title"],
+                "link": f"http://arxiv.org/abs/{row['id']}",
+                "date": datetime.fromisoformat(row["published"]).date(),
+                "abstract": row["abstract"],
+            }
+        )
 
     conn.close()
     return papers
@@ -132,18 +135,17 @@ def patch_scraper_for_local_mirror(monkeypatch, files_dir: Path = DEFAULT_FILES_
         def patched_scraper(monkeypatch):
             patch_scraper_for_local_mirror(monkeypatch)
     """
+
     def local_fetch_paper_content(paper_id):
         return mock_fetch_paper_content(paper_id, files_dir)
 
     monkeypatch.setattr(
-        "paperweight.scraper.fetch_paper_content",
-        local_fetch_paper_content
+        "paperweight.scraper.fetch_paper_content", local_fetch_paper_content
     )
 
     # Also patch the retry-decorated wrapper if needed
     monkeypatch.setattr(
-        "paperweight.scraper.fetch_arxiv_papers",
-        mock_fetch_arxiv_papers
+        "paperweight.scraper.fetch_arxiv_papers", mock_fetch_arxiv_papers
     )
 
 
@@ -159,7 +161,7 @@ class MockArxivClient:
         page_size: int = 100,
         delay_seconds: float = 3,
         num_retries: int = 3,
-        mirror_path: Path = DEFAULT_MIRROR_PATH
+        mirror_path: Path = DEFAULT_MIRROR_PATH,
     ):
         self.page_size = page_size
         self.delay_seconds = delay_seconds
@@ -174,17 +176,15 @@ class MockArxivClient:
             )
 
     def results(
-        self,
-        search: arxiv.Search,
-        offset: int = 0
+        self, search: arxiv.Search, offset: int = 0
     ) -> Generator[arxiv.Result, None, None]:
         """Execute search against local SQLite database."""
         conn = sqlite3.connect(self.mirror_db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        query_str = getattr(search, 'query', '')
-        id_list = getattr(search, 'id_list', [])
+        query_str = getattr(search, "query", "")
+        id_list = getattr(search, "id_list", [])
 
         sql = "SELECT * FROM papers WHERE 1=1"
         params: List[Any] = []
@@ -211,7 +211,7 @@ class MockArxivClient:
                     params.append(f"%{term}%")
                     params.append(f"%{term}%")
 
-        max_results = getattr(search, 'max_results', None)
+        max_results = getattr(search, "max_results", None)
         if max_results:
             sql += " LIMIT ?"
             params.append(int(max_results))
@@ -231,29 +231,29 @@ class MockArxivClient:
             def __init__(self, name: str):
                 self.name = name
 
-        authors = [Author(n.strip()) for n in row['authors'].split(',')]
-        paper_id = row['id']
+        authors = [Author(n.strip()) for n in row["authors"].split(",")]
+        paper_id = row["id"]
 
         res = arxiv.Result(
             entry_id=f"http://arxiv.org/abs/{paper_id}",
-            updated=datetime.fromisoformat(row['updated']),
-            published=datetime.fromisoformat(row['published']),
-            title=row['title'],
+            updated=datetime.fromisoformat(row["updated"]),
+            published=datetime.fromisoformat(row["published"]),
+            title=row["title"],
             authors=authors,
-            summary=row['abstract'],
+            summary=row["abstract"],
             comment=None,
             journal_ref=None,
-            doi=row['doi'],
-            primary_category=row['categories'].split(',')[0].strip(),
-            categories=[cat.strip() for cat in row['categories'].split(',')],
-            links=[]
+            doi=row["doi"],
+            primary_category=row["categories"].split(",")[0].strip(),
+            categories=[cat.strip() for cat in row["categories"].split(",")],
+            links=[],
         )
 
         # Monkey-patch download methods to use local files
-        local_pdf_path = row['local_file_path']
-        local_source_path = row['local_source_path']
+        local_pdf_path = row["local_file_path"]
+        local_source_path = row["local_source_path"]
 
-        def mock_download_pdf(dirpath: str = './', filename: str = '') -> str:
+        def mock_download_pdf(dirpath: str = "./", filename: str = "") -> str:
             if not filename:
                 filename = f"{paper_id}.pdf"
             target_path = Path(dirpath) / filename
@@ -263,7 +263,7 @@ class MockArxivClient:
                 return str(target_path)
             raise FileNotFoundError(f"Mock PDF file missing for {paper_id}")
 
-        def mock_download_source(dirpath: str = './', filename: str = '') -> str:
+        def mock_download_source(dirpath: str = "./", filename: str = "") -> str:
             if not filename:
                 filename = f"{paper_id}.tar.gz"
             target_path = Path(dirpath) / filename
@@ -275,6 +275,6 @@ class MockArxivClient:
 
         res.download_pdf = mock_download_pdf  # type: ignore
         res.download_source = mock_download_source  # type: ignore
-        res.pdf_url = row['pdf_url']
+        res.pdf_url = row["pdf_url"]
 
         return res

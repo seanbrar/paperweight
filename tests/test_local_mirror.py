@@ -52,7 +52,9 @@ class TestMockFetching:
         assert method == "source"
         assert len(content) > 0
 
-    def test_mock_fetch_paper_content_pdf_fallback(self, local_mirror_files: Path, tmp_path: Path):
+    def test_mock_fetch_paper_content_pdf_fallback(
+        self, local_mirror_files: Path, tmp_path: Path
+    ):
         """Test PDF fallback when source is missing."""
         # Create a PDF-only test case
         test_pdf = tmp_path / "test_paper.pdf"
@@ -73,10 +75,10 @@ class TestMockFetching:
     def test_mock_fetch_arxiv_papers(self, local_mirror_db: Path):
         """Fetch papers by category from local database."""
         papers = mock_fetch_arxiv_papers(
-            category="cs.AI",
+            categories=["cs.AI"],
             start_date=date(2024, 1, 1),
             max_results=5,
-            db_path=local_mirror_db
+            db_path=local_mirror_db,
         )
 
         # May be empty if no cs.AI papers, but should not error
@@ -118,9 +120,19 @@ class TestMockArxivClient:
             doi TEXT, local_file_path TEXT, local_source_path TEXT)""")
         conn.execute(
             "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            ("1706.03762v7", "Attention Is All You Need", "Abstract",
-             "Vaswani et al.", "cs.CL,cs.LG", "2017-06-12", "2017-06-12",
-             "http://arxiv.org/pdf/1706.03762v7", None, None, None),
+            (
+                "1706.03762v7",
+                "Attention Is All You Need",
+                "Abstract",
+                "Vaswani et al.",
+                "cs.CL,cs.LG",
+                "2017-06-12",
+                "2017-06-12",
+                "http://arxiv.org/pdf/1706.03762v7",
+                None,
+                None,
+                None,
+            ),
         )
         conn.commit()
         conn.close()
@@ -152,8 +164,19 @@ class TestMockArxivClient:
             doi TEXT, local_file_path TEXT, local_source_path TEXT)""")
         conn.execute(
             "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            ("1706.03762v7", "Test Paper", "Abstract", "Author", "cs.AI",
-             "2017-06-12", "2017-06-12", "http://example.com", None, None, None),
+            (
+                "1706.03762v7",
+                "Test Paper",
+                "Abstract",
+                "Author",
+                "cs.AI",
+                "2017-06-12",
+                "2017-06-12",
+                "http://example.com",
+                None,
+                None,
+                None,
+            ),
         )
         conn.commit()
         conn.close()
@@ -185,13 +208,35 @@ class TestMockArxivClient:
             doi TEXT, local_file_path TEXT, local_source_path TEXT)""")
         conn.execute(
             "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            ("1706.03762v1", "Paper v1", "Abstract", "Author", "cs.AI",
-             "2017-06-12", "2017-06-12", "http://example.com", None, None, None),
+            (
+                "1706.03762v1",
+                "Paper v1",
+                "Abstract",
+                "Author",
+                "cs.AI",
+                "2017-06-12",
+                "2017-06-12",
+                "http://example.com",
+                None,
+                None,
+                None,
+            ),
         )
         conn.execute(
             "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            ("1706.03762v7", "Paper v7", "Abstract", "Author", "cs.AI",
-             "2017-06-12", "2017-12-01", "http://example.com", None, None, None),
+            (
+                "1706.03762v7",
+                "Paper v7",
+                "Abstract",
+                "Author",
+                "cs.AI",
+                "2017-06-12",
+                "2017-12-01",
+                "http://example.com",
+                None,
+                None,
+                None,
+            ),
         )
         conn.commit()
         conn.close()
@@ -215,7 +260,9 @@ class TestMockArxivClient:
         # Results depend on what's in the mirror
         assert isinstance(results, list)
 
-    def test_client_search_by_id(self, mock_arxiv_client: MockArxivClient, local_mirror_db: Path):
+    def test_client_search_by_id(
+        self, mock_arxiv_client: MockArxivClient, local_mirror_db: Path
+    ):
         """Search by ID returns matching paper."""
         import arxiv
 
@@ -237,14 +284,18 @@ class TestMockArxivClient:
         assert len(results) == 1
         assert paper_id in results[0].entry_id
 
-    def test_result_has_download_methods(self, mock_arxiv_client: MockArxivClient, local_mirror_db: Path):
+    def test_result_has_download_methods(
+        self, mock_arxiv_client: MockArxivClient, local_mirror_db: Path
+    ):
         """arxiv.Result objects have mocked download methods."""
         import arxiv
 
         # Get a paper with files
         conn = sqlite3.connect(local_mirror_db)
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM papers WHERE local_file_path IS NOT NULL LIMIT 1")
+        cursor.execute(
+            "SELECT id FROM papers WHERE local_file_path IS NOT NULL LIMIT 1"
+        )
         row = cursor.fetchone()
         conn.close()
 
@@ -259,8 +310,8 @@ class TestMockArxivClient:
         result = results[0]
 
         # Check methods exist
-        assert hasattr(result, 'download_pdf')
-        assert hasattr(result, 'download_source')
+        assert hasattr(result, "download_pdf")
+        assert hasattr(result, "download_source")
         assert callable(result.download_pdf)
         assert callable(result.download_source)
 
@@ -324,10 +375,10 @@ class TestFullPipelineLocal:
 
         # Get papers from local database
         papers_raw = mock_fetch_arxiv_papers(
-            category="cs",  # Broad category
+            categories=["cs"],  # Broad category
             start_date=date(2024, 1, 1),
             max_results=5,
-            db_path=local_mirror_db
+            db_path=local_mirror_db,
         )
 
         if not papers_raw:
@@ -342,15 +393,17 @@ class TestFullPipelineLocal:
             if content and method:
                 try:
                     text = extract_text_from_source(content, method)
-                    papers_with_content.append({
-                        "id": paper_id,
-                        "title": paper["title"],
-                        "link": paper["link"],
-                        "date": paper["date"],
-                        "abstract": paper["abstract"],
-                        "content": text or "",
-                        "content_type": method,
-                    })
+                    papers_with_content.append(
+                        {
+                            "id": paper_id,
+                            "title": paper["title"],
+                            "link": paper["link"],
+                            "date": paper["date"],
+                            "abstract": paper["abstract"],
+                            "content": text or "",
+                            "content_type": method,
+                        }
+                    )
                 except Exception:
                     # Skip papers that fail extraction
                     continue
@@ -382,10 +435,10 @@ class TestFullPipelineLocal:
 
         # Get papers
         papers_raw = mock_fetch_arxiv_papers(
-            category="cs.AI",
+            categories=["cs.AI"],
             start_date=date(2024, 1, 1),
             max_results=10,
-            db_path=local_mirror_db
+            db_path=local_mirror_db,
         )
 
         if not papers_raw:
@@ -400,15 +453,17 @@ class TestFullPipelineLocal:
             if content and method:
                 try:
                     text = extract_text_from_source(content, method)
-                    papers_with_content.append({
-                        "id": paper_id,
-                        "title": paper["title"],
-                        "link": paper["link"],
-                        "date": paper["date"],
-                        "abstract": paper["abstract"],
-                        "content": text or paper["abstract"],
-                        "content_type": method,
-                    })
+                    papers_with_content.append(
+                        {
+                            "id": paper_id,
+                            "title": paper["title"],
+                            "link": paper["link"],
+                            "date": paper["date"],
+                            "abstract": paper["abstract"],
+                            "content": text or paper["abstract"],
+                            "content_type": method,
+                        }
+                    )
                 except Exception:
                     continue
 
@@ -426,12 +481,14 @@ class TestFullPipelineLocal:
 class TestNoNetworkCalls:
     """Verify that local mirror tests make no real network calls."""
 
-    def test_mock_functions_are_offline(self, local_mirror_files: Path, local_mirror_db: Path):
+    def test_mock_functions_are_offline(
+        self, local_mirror_files: Path, local_mirror_db: Path
+    ):
         """Ensure mock functions don't make HTTP requests."""
         with patch("requests.get") as mock_get, patch("requests.post") as mock_post:
             # Call mock functions
             mock_fetch_paper_content("1706.03762", local_mirror_files)
-            mock_fetch_arxiv_papers("cs.AI", date.today(), 5, local_mirror_db)
+            mock_fetch_arxiv_papers(["cs.AI"], date.today(), 5, local_mirror_db)
 
             # Verify no HTTP calls
             mock_get.assert_not_called()
@@ -472,7 +529,9 @@ class TestGoldenSetScoring:
         # Get metadata from DB
         conn = sqlite3.connect(local_mirror_db)
         cursor = conn.cursor()
-        cursor.execute("SELECT title, abstract FROM papers WHERE id LIKE ?", ("1706.03762%",))
+        cursor.execute(
+            "SELECT title, abstract FROM papers WHERE id LIKE ?", ("1706.03762%",)
+        )
         row = cursor.fetchone()
         conn.close()
 

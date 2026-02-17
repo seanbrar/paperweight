@@ -12,13 +12,18 @@ import json
 import logging
 import os
 import tarfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)  # ThreadPoolExecutor still used by fetch_paper_contents
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import arxiv
+import arxiv as _arxiv_module
 import requests
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -36,13 +41,43 @@ from paperweight.utils import (
 logger = logging.getLogger(__name__)
 
 
+class ArxivRateLimitError(RuntimeError):
+    """Raised when arXiv returns HTTP 429 (Too Many Requests).
+
+    Provides a user-friendly error message instead of a raw stack trace.
+    """
+
+    def __init__(self, original: Exception | None = None):
+        message = (
+            "arXiv rate-limited our request (HTTP 429).\n"
+            "  The API allows ≤1 request every 3 seconds.\n"
+            "  Please wait a few minutes and try again, "
+            "or reduce arxiv.max_results."
+        )
+        super().__init__(message)
+        self.original = original
+
+
+def _log_arxiv_retry(retry_state: RetryCallState) -> None:
+    """Log a tenacity retry attempt for arXiv API calls."""
+    wait = retry_state.next_action.sleep if retry_state.next_action else 0
+    logger.warning(
+        "arXiv request failed (attempt %d), retrying in %.0fs…",
+        retry_state.attempt_number,
+        wait,
+    )
+
+
 def fetch_arxiv_papers(
-    category: str, start_date: date, max_results: Optional[int] = None
+    categories: List[str], start_date: date, max_results: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """Fetch papers from arXiv API for a specific category and date range.
+    """Fetch papers from arXiv API for one or more categories.
+
+    Categories are batched into a single API query using OR syntax
+    (e.g. ``cat:cs.AI OR cat:cs.CL``) to minimize HTTP requests.
 
     Args:
-        category: The arXiv category to fetch papers from (e.g., 'cs.AI').
+        categories: arXiv categories to fetch (e.g., ``['cs.AI', 'cs.CL']``).
         start_date: The date from which to start fetching papers.
         max_results: Optional maximum number of results to return.
 
@@ -50,19 +85,22 @@ def fetch_arxiv_papers(
         List of dictionaries containing paper metadata.
 
     Raises:
-        requests.ConnectionError: If connection to arXiv API fails.
-        requests.Timeout: If the request times out.
+        ArxivRateLimitError: If arXiv returns HTTP 429 after all retries.
     """
-    logger.debug(f"Fetching arXiv papers for category '{category}' since {start_date}")
+    logger.debug(
+        "Fetching arXiv papers for categories %s since %s", categories, start_date
+    )
 
-    # Construct the query
-    query = f"cat:{category}"
+    # Build a single batched query: "cat:cs.AI OR cat:cs.CL OR …"
+    query = " OR ".join(f"cat:{c}" for c in categories)
 
-    # Configure the client
+    # Match page_size to max_results so we don't over-fetch
+    effective_page_size = min(max_results, 100) if max_results else 100
+
     client = arxiv.Client(
-        page_size=100,
+        page_size=effective_page_size,
         delay_seconds=3.0,
-        num_retries=3
+        num_retries=3,
     )
 
     search = arxiv.Search(
@@ -72,18 +110,41 @@ def fetch_arxiv_papers(
         sort_order=arxiv.SortOrder.Descending,
     )
 
-    papers = []
+    return _fetch_with_backoff(client, search, start_date, max_results)
+
+
+@retry(
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=3, min=5, max=90),
+    retry=retry_if_exception_type(_arxiv_module.HTTPError),
+    before_sleep=_log_arxiv_retry,
+    reraise=True,
+)
+def _fetch_with_backoff(
+    client: arxiv.Client,
+    search: arxiv.Search,
+    start_date: date,
+    max_results: Optional[int],
+) -> List[Dict[str, Any]]:
+    """Consume ``client.results()`` with tenacity retry on HTTP errors.
+
+    The arxiv.py library raises ``arxiv.HTTPError`` for non-200 responses
+    (including 429). This wrapper adds exponential backoff
+    (5 s → 15 s → 45 s) on top of the library's own flat retry.
+    """
+    papers: List[Dict[str, Any]] = []
 
     try:
-        # Iterate through the results
         for result in client.results(search):
             submitted_date = result.published.date()
 
-            logger.debug(f"Paper '{result.title}' submitted on {submitted_date}")
+            logger.debug("Paper '%s' submitted on %s", result.title, submitted_date)
 
             if submitted_date < start_date:
                 logger.debug(
-                    f"Stopping fetch: paper date {submitted_date} is before start date {start_date}"
+                    "Stopping fetch: paper date %s is before start date %s",
+                    submitted_date,
+                    start_date,
                 )
                 break
 
@@ -101,19 +162,23 @@ def fetch_arxiv_papers(
                 }
             )
 
-            # Safety break if max_results is set multiple times or if the generator doesn't stop
-            if max_results is not None and max_results > 0 and len(papers) >= max_results:
+            if (
+                max_results is not None
+                and max_results > 0
+                and len(papers) >= max_results
+            ):
                 break
 
-    except Exception as e:
-         # Map arxiv errors or other unexpected errors
-         logger.error(f"Error fetching papers: {e}")
-         # We might want to re-raise or handle gracefully depending on the exact error
-         # For now, consistent with previous behavior, let's allow tenacity or caller to handle
-         raise
+    except _arxiv_module.HTTPError as exc:
+        if getattr(exc, "status", None) == 429:
+            raise ArxivRateLimitError(original=exc) from exc
+        raise
 
     logger.info(
-        f"Successfully fetched {len(papers)} papers for category '{category}' since {start_date}"
+        "Successfully fetched %d papers for query '%s' since %s",
+        len(papers),
+        search.query,
+        start_date,
     )
     return papers
 
@@ -121,62 +186,46 @@ def fetch_arxiv_papers(
 def fetch_recent_papers(config, start_days=1):
     """Fetch papers published within the last specified number of days.
 
+    All configured categories are combined into a single arXiv API query
+    using OR syntax to minimize HTTP requests.
+
     Args:
+        config: Application configuration dictionary.
         start_days: Number of days to look back for papers.
 
     Returns:
         List of dictionaries containing paper metadata.
     """
     categories = config["arxiv"]["categories"]
-    max_results = config["arxiv"].get("max_results", 0)  # Default to 0 if not set
+    max_results = config["arxiv"].get("max_results", 0)
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=start_days)
 
-    logger.info(f"Fetching papers from {start_date} to {end_date}")
+    logger.info("Fetching papers from %s to %s", start_date, end_date)
+    logger.info("Categories: %s (single batched query)", categories)
 
-    def _fetch_category(category):
-        logger.info(f"Processing category: {category}")
-        try:
-            return category, fetch_arxiv_papers(
-                category,
-                start_date,
-                max_results=max_results if max_results > 0 else None,
-            )
-        except ValueError as ve:
-            logger.error(f"Error fetching papers for category {category}: {ve}")
-            return category, []
+    papers = fetch_arxiv_papers(
+        categories,
+        start_date,
+        max_results=max_results if max_results > 0 else None,
+    )
 
-    all_papers = []
-    processed_ids: set = set()
+    # Deduplicate by arXiv ID (papers can appear in multiple categories)
+    seen_ids: set = set()
+    unique_papers: list = []
+    for paper in papers:
+        paper_id = paper["link"].split("/abs/")[-1]
+        if paper_id not in seen_ids:
+            seen_ids.add(paper_id)
+            unique_papers.append(paper)
 
-    workers = min(len(categories), 4) if categories else 1
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(_fetch_category, cat): cat for cat in categories}
-        # Collect in submission order for deterministic results
-        results_by_cat = {}
-        for future in as_completed(futures):
-            cat, papers = future.result()
-            results_by_cat[cat] = papers
+    if max_results > 0:
+        unique_papers = unique_papers[:max_results]
 
-    for category in categories:
-        papers = results_by_cat.get(category, [])
-        new_papers = [
-            paper
-            for paper in papers
-            if paper["link"].split("/abs/")[-1] not in processed_ids
-        ]
-        processed_ids.update(
-            paper["link"].split("/abs/")[-1] for paper in new_papers
-        )
-
-        if max_results > 0:
-            new_papers = new_papers[:max_results]
-
-        all_papers.extend(new_papers)
-        logger.debug(f"Added {len(new_papers)} new papers from category {category}")
-
-    logger.info(f"Fetched a total of {len(all_papers)} papers")
-    return all_papers
+    logger.info(
+        "Fetched %d unique papers (from %d raw)", len(unique_papers), len(papers)
+    )
+    return unique_papers
 
 
 @retry(
@@ -346,7 +395,9 @@ def _hydrate_papers_with_content(papers, config, db_enabled):
 
             artifacts = []
             if db_enabled:
-                artifacts = _store_artifacts(paper_id, method, content, text, storage_base)
+                artifacts = _store_artifacts(
+                    paper_id, method, content, text, storage_base
+                )
 
             paper_with_content = dict(paper)
             paper_with_content.update(
@@ -359,7 +410,9 @@ def _hydrate_papers_with_content(papers, config, db_enabled):
             )
             papers_with_content.append(paper_with_content)
 
-    logger.info("Hydrated %s/%s papers with full content", len(papers_with_content), len(papers))
+    logger.info(
+        "Hydrated %s/%s papers with full content", len(papers_with_content), len(papers)
+    )
     return papers_with_content
 
 
@@ -490,7 +543,9 @@ def get_recent_papers(config, force_refresh=False, include_content=True):  # noq
         else:
             days = (current_date - last_processed_date).days
             if days == 0:
-                logger.info("Already processed papers for today. No new papers to fetch.")
+                logger.info(
+                    "Already processed papers for today. No new papers to fetch."
+                )
                 return []
             elif days > 7:
                 # If more than a week has passed, limit to 7 days to avoid overload
@@ -572,7 +627,9 @@ def _store_artifacts(paper_id, method, content, text, storage_base):
         try:
             _write_bytes(raw_path, content)
             artifacts.append(
-                _artifact_record("source" if method == "source" else "pdf", raw_path, content)
+                _artifact_record(
+                    "source" if method == "source" else "pdf", raw_path, content
+                )
             )
         except OSError as e:
             logger.error("Failed to write source artifact %s: %s", raw_path, e)
