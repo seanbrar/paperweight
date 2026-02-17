@@ -47,10 +47,14 @@ source .venv/bin/activate
 ## Quick start (works without API keys)
 
 ```bash
-paperweight init           # create config.yaml with safe defaults
-paperweight doctor         # check your setup for issues
-paperweight run --force-refresh  # fetch papers and produce a digest
+paperweight init    # create config.yaml with safe defaults
+paperweight doctor  # check your setup for issues
+paperweight run     # fetch papers and produce a digest
 ```
+
+The first run automatically backfills a week of papers. After that, the same
+`paperweight run` fetches only what's new. Use `--force-refresh` to re-fetch
+if you've already run today.
 
 Notes:
 

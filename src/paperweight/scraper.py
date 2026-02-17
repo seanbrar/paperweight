@@ -7,17 +7,21 @@ API interactions and various methods for processing paper content.
 
 import gzip
 import hashlib
+import html
 import io
 import json
 import logging
 import os
+import re
 import tarfile
 from concurrent.futures import (
     ThreadPoolExecutor,
     as_completed,
 )  # ThreadPoolExecutor still used by fetch_paper_contents
 from datetime import date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
+from xml.etree import ElementTree as ET
 
 import arxiv
 import arxiv as _arxiv_module
@@ -39,6 +43,8 @@ from paperweight.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_RSS_BASE_URL = "https://rss.arxiv.org/rss/"
 
 
 class ArxivRateLimitError(RuntimeError):
@@ -183,11 +189,150 @@ def _fetch_with_backoff(
     return papers
 
 
+def _strip_html_tags(text):
+    """Remove HTML tags from a string."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
+def _parse_rss_description(description):
+    """Extract abstract text from an RSS item's description field.
+
+    The description typically contains HTML with an "Abstract:" marker.
+    """
+    if not description:
+        return ""
+    text = _strip_html_tags(html.unescape(description))
+    marker = "Abstract:"
+    idx = text.find(marker)
+    if idx != -1:
+        return text[idx + len(marker) :].strip()
+    return text.strip()
+
+
+def _parse_rss_item(item, ns):
+    """Parse a single RSS <item> element into a paper dict.
+
+    Returns None for announce_type == "replace" (updates to old papers).
+    """
+    # Check for replace announcements
+    announce_type_el = item.find("arxiv:announce_type", ns)
+    if announce_type_el is not None and announce_type_el.text == "replace":
+        return None
+
+    title = item.findtext("title", default="", namespaces=ns).strip()
+    link = item.findtext("link", default="", namespaces=ns).strip()
+    description = item.findtext("description", default="", namespaces=ns)
+    abstract = _parse_rss_description(description)
+
+    # Parse date
+    pub_date_text = item.findtext("pubDate", default="", namespaces=ns)
+    if pub_date_text:
+        try:
+            paper_date = parsedate_to_datetime(pub_date_text).date()
+        except (ValueError, TypeError):
+            paper_date = datetime.now().date()
+    else:
+        paper_date = datetime.now().date()
+
+    # Parse authors from dc:creator
+    creator_el = item.find("dc:creator", ns)
+    if creator_el is not None and creator_el.text:
+        # dc:creator contains a comma+space-separated list like "Author One, Author Two"
+        # but can also use &lt;a href=...&gt; tags — strip those
+        raw_authors = _strip_html_tags(html.unescape(creator_el.text))
+        authors = [a.strip() for a in raw_authors.split(",") if a.strip()]
+    else:
+        authors = []
+
+    # Collect categories
+    categories = []
+    for cat_el in item.findall("category", ns):
+        if cat_el.text:
+            categories.append(cat_el.text.strip())
+
+    # Extract arXiv ID from link
+    arxiv_id, _ = split_arxiv_id(link)
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+
+    return {
+        "title": title,
+        "link": link,
+        "date": paper_date,
+        "abstract": abstract,
+        "authors": authors,
+        "categories": categories,
+        "pdf_url": pdf_url,
+        "id": arxiv_id,
+    }
+
+
+@retry(
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=2, min=2, max=8),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    reraise=True,
+)
+def _fetch_single_rss_feed(url):
+    """Fetch a single RSS feed URL with retry on connection errors."""
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    return response.text
+
+
+def fetch_rss_papers(categories):
+    """Fetch today's papers from arXiv RSS feeds.
+
+    Iterates over categories, fetches each feed, parses items,
+    and deduplicates by arXiv ID. Per-category errors are logged and skipped.
+
+    Args:
+        categories: List of arXiv category strings (e.g., ['cs.AI', 'cs.CL']).
+
+    Returns:
+        List of paper dicts (same schema as fetch_arxiv_papers output).
+    """
+    seen_ids = set()
+    papers = []
+
+    for category in categories:
+        url = f"{_RSS_BASE_URL}{category}"
+        try:
+            xml_text = _fetch_single_rss_feed(url)
+            root = ET.fromstring(xml_text)
+        except Exception:
+            logger.warning("RSS fetch failed for category %s, skipping", category)
+            continue
+
+        # Build namespace map from the root element
+        ns = {}
+        for prefix, uri in [
+            ("dc", "http://purl.org/dc/elements/1.1/"),
+            ("arxiv", "http://arxiv.org/schemas/atom"),
+        ]:
+            ns[prefix] = uri
+
+        channel = root.find("channel")
+        if channel is None:
+            continue
+
+        for item in channel.findall("item"):
+            paper = _parse_rss_item(item, ns)
+            if paper is None:
+                continue
+            if paper["id"] not in seen_ids:
+                seen_ids.add(paper["id"])
+                papers.append(paper)
+
+    logger.info("RSS fetched %d unique papers from %d categories", len(papers), len(categories))
+    return papers
+
+
 def fetch_recent_papers(config, start_days=1):
     """Fetch papers published within the last specified number of days.
 
-    All configured categories are combined into a single arXiv API query
-    using OR syntax to minimize HTTP requests.
+    For daily lookups (start_days <= 1), RSS feeds are tried first since they
+    have no rate limits. Falls back to the arXiv API on failure or empty results.
+    For multi-day ranges (start_days > 1), the arXiv API is used directly.
 
     Args:
         config: Application configuration dictionary.
@@ -202,13 +347,26 @@ def fetch_recent_papers(config, start_days=1):
     start_date = end_date - timedelta(days=start_days)
 
     logger.info("Fetching papers from %s to %s", start_date, end_date)
-    logger.info("Categories: %s (single batched query)", categories)
 
-    papers = fetch_arxiv_papers(
-        categories,
-        start_date,
-        max_results=max_results if max_results > 0 else None,
-    )
+    papers = []
+
+    # RSS-first path for daily lookups (no rate limits)
+    if start_days <= 1:
+        logger.info("Categories: %s (RSS feeds)", categories)
+        try:
+            papers = fetch_rss_papers(categories)
+        except Exception:
+            logger.warning("RSS fetch failed, falling back to arXiv API")
+            papers = []
+
+    # arXiv API fallback (or primary path for multi-day ranges)
+    if not papers:
+        logger.info("Categories: %s (arXiv API query)", categories)
+        papers = fetch_arxiv_papers(
+            categories,
+            start_date,
+            max_results=max_results if max_results > 0 else None,
+        )
 
     # Deduplicate by arXiv ID (papers can appear in multiple categories)
     seen_ids: set = set()
@@ -536,10 +694,14 @@ def get_recent_papers(config, force_refresh=False, include_content=True):  # noq
             logger.info("Loaded %d papers from metadata cache", len(recent_papers))
 
     if recent_papers is None:
-        if last_processed_date is None or force_refresh:
-            # If never run before, fetch papers from the last 7 days
+        if last_processed_date is None:
+            # Bootstrap: first run ever — backfill a week of papers
             days = 7
             logger.info("First run detected. Fetching papers from the last 7 days.")
+        elif force_refresh:
+            # User wants the freshest data; 1-day window enables the fast RSS path
+            days = 1
+            logger.info("Force refresh: fetching today's papers.")
         else:
             days = (current_date - last_processed_date).days
             if days == 0:
