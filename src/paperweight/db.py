@@ -14,9 +14,7 @@ def is_db_enabled(config: Dict[str, Any]) -> bool:
 
 
 @contextmanager
-def connect_db(
-    db_config: Dict[str, Any], autocommit: bool = False
-) -> Generator:
+def connect_db(db_config: Dict[str, Any], autocommit: bool = False) -> Generator:
     """Create a database connection.
 
     Args:

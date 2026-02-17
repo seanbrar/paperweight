@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-16
+
+### Changed
+- arXiv categories are now batched into a single OR query (`cat:cs.AI OR cat:cs.CL`), reducing N parallel API calls to 1
+- `page_size` now matches `min(max_results, 100)` instead of always requesting 100 results
+- `ThreadPoolExecutor` removed from `fetch_recent_papers()` since only one API call is made
+- `--force-refresh` now fetches today's papers (1-day window) instead of a full 7-day backfill; the 7-day bootstrap is reserved for first runs only
+- Quick Start no longer recommends `--force-refresh` for the initial run since `paperweight run` already backfills automatically
+
+### Added
+- RSS feed fetcher (`fetch_rss_papers`) for daily lookups — no rate limits, sub-second metadata fetch
+- RSS-first routing in `fetch_recent_papers`: daily runs try RSS before falling back to the arXiv API
+- Exponential backoff (via `tenacity`) on `arxiv.HTTPError` with waits of 5 → 15 → 45 → 90 s
+- `ArxivRateLimitError` exception with user-friendly message for HTTP 429 responses
+
 ## [0.3.0] - 2026-02-15
 
 ### Added
@@ -87,7 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Email notification system
 - YAML-based configuration
 
-[Unreleased]: https://github.com/seanbrar/paperweight/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/seanbrar/paperweight/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/seanbrar/paperweight/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/seanbrar/paperweight/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/seanbrar/paperweight/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/seanbrar/paperweight/compare/v0.1.1...v0.1.2

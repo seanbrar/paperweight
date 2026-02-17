@@ -18,15 +18,15 @@ from paperweight.processor import (
 def processor_config():
     """Standard processor configuration for tests."""
     return {
-        'keywords': ['AI', 'healthcare', 'quantum', 'computing'],
-        'exclusion_keywords': ['biology'],
-        'important_words': ['artificial intelligence'],
-        'title_keyword_weight': 3,
-        'abstract_keyword_weight': 2,
-        'content_keyword_weight': 1,
-        'exclusion_keyword_penalty': 5,
-        'important_words_weight': 0.5,
-        'min_score': 0,
+        "keywords": ["AI", "healthcare", "quantum", "computing"],
+        "exclusion_keywords": ["biology"],
+        "important_words": ["artificial intelligence"],
+        "title_keyword_weight": 3,
+        "abstract_keyword_weight": 2,
+        "content_keyword_weight": 1,
+        "exclusion_keyword_penalty": 5,
+        "important_words_weight": 0.5,
+        "min_score": 0,
     }
 
 
@@ -36,17 +36,17 @@ class TestCalculatePaperScore:
     def test_score_breakdown_structure(self, processor_config):
         """Score calculation returns score and breakdown dict."""
         paper = {
-            'title': 'AI in Healthcare',
-            'abstract': 'This paper discusses AI applications in healthcare.',
-            'content': 'Artificial Intelligence has numerous applications in healthcare...'
+            "title": "AI in Healthcare",
+            "abstract": "This paper discusses AI applications in healthcare.",
+            "content": "Artificial Intelligence has numerous applications in healthcare...",
         }
 
         score, breakdown = calculate_paper_score(paper, processor_config)
 
         assert score > 0
-        assert 'keyword_matching' in breakdown
-        assert 'exclusion_penalty' in breakdown
-        assert 'important_words' in breakdown
+        assert "keyword_matching" in breakdown
+        assert "exclusion_penalty" in breakdown
+        assert "important_words" in breakdown
 
 
 class TestProcessPapers:
@@ -56,24 +56,24 @@ class TestProcessPapers:
         """Papers are sorted by relevance score, highest first."""
         papers = [
             {
-                'title': 'AI in Healthcare',
-                'abstract': 'This paper discusses the applications of AI in healthcare.',
-                'content': 'Artificial Intelligence has numerous applications in healthcare...'
+                "title": "AI in Healthcare",
+                "abstract": "This paper discusses the applications of AI in healthcare.",
+                "content": "Artificial Intelligence has numerous applications in healthcare...",
             },
             {
-                'title': 'Quantum Computing Advances',
-                'abstract': 'Recent advancements in quantum computing are presented.',
-                'content': 'Quantum computing has seen significant progress in recent years...'
-            }
+                "title": "Quantum Computing Advances",
+                "abstract": "Recent advancements in quantum computing are presented.",
+                "content": "Quantum computing has seen significant progress in recent years...",
+            },
         ]
-        processor_config['min_score'] = 5
+        processor_config["min_score"] = 5
 
         processed = process_papers(papers, processor_config)
 
         assert len(processed) == 2
-        assert processed[0]['relevance_score'] > processed[1]['relevance_score']
-        assert 'score_breakdown' in processed[0]
-        assert 'normalized_score' in processed[0]
+        assert processed[0]["relevance_score"] > processed[1]["relevance_score"]
+        assert "score_breakdown" in processed[0]
+        assert "normalized_score" in processed[0]
 
     def test_empty_input_returns_empty(self, processor_config):
         """Empty paper list returns empty result."""
@@ -121,24 +121,29 @@ class TestNormalizeScores:
     def test_normalization_range(self):
         """Scores are normalized to 0-1 range."""
         papers = [
-            {'relevance_score': 10},
-            {'relevance_score': 20},
-            {'relevance_score': 30},
-            {'relevance_score': 40},
+            {"relevance_score": 10},
+            {"relevance_score": 20},
+            {"relevance_score": 30},
+            {"relevance_score": 40},
         ]
         normalized = normalize_scores(papers)
 
-        assert normalized[0]['normalized_score'] == 0.0
-        assert normalized[-1]['normalized_score'] == 1.0
-        assert 0.0 < normalized[1]['normalized_score'] < normalized[2]['normalized_score'] < 1.0
+        assert normalized[0]["normalized_score"] == 0.0
+        assert normalized[-1]["normalized_score"] == 1.0
+        assert (
+            0.0
+            < normalized[1]["normalized_score"]
+            < normalized[2]["normalized_score"]
+            < 1.0
+        )
 
     def test_equal_scores_normalize_to_one(self):
         """When all scores are equal, normalized scores are 1.0."""
         papers = [
-            {'relevance_score': 10},
-            {'relevance_score': 10},
-            {'relevance_score': 10}
+            {"relevance_score": 10},
+            {"relevance_score": 10},
+            {"relevance_score": 10},
         ]
         normalized = normalize_scores(papers)
 
-        assert all(paper['normalized_score'] == 1.0 for paper in normalized)
+        assert all(paper["normalized_score"] == 1.0 for paper in normalized)

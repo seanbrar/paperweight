@@ -66,7 +66,9 @@ def get_abstracts(processed_papers, config, *, summary_concurrency=None):
     if analysis_type == "abstract":
         return [paper["abstract"] for paper in processed_papers]
     if analysis_type == "summary":
-        return summarize_papers(processed_papers, config, summary_concurrency=summary_concurrency)
+        return summarize_papers(
+            processed_papers, config, summary_concurrency=summary_concurrency
+        )
     raise ValueError(f"Unknown analysis type: {analysis_type}")
 
 
@@ -115,9 +117,7 @@ def _resolve_triage_model_config(
     analyzer_cfg = full_config.get("analyzer", {})
 
     provider = (
-        triage_cfg.get("llm_provider")
-        or analyzer_cfg.get("llm_provider")
-        or "openai"
+        triage_cfg.get("llm_provider") or analyzer_cfg.get("llm_provider") or "openai"
     ).lower()
     model = triage_cfg.get("model") or _default_model_for_provider(provider)
     api_key = (
@@ -206,7 +206,9 @@ async def _triage_one_paper_async(prompt, pollux_config, *, min_score):
     return _parse_triage_decision(answer, min_score=min_score)
 
 
-async def _run_triage_async(prompts, pollux_config, *, min_score, concurrency=TRIAGE_CONCURRENCY):
+async def _run_triage_async(
+    prompts, pollux_config, *, min_score, concurrency=TRIAGE_CONCURRENCY
+):
     """Run triage prompts concurrently with a semaphore, returning decisions in order."""
     semaphore = asyncio.Semaphore(concurrency)
     total = len(prompts)
@@ -277,11 +279,18 @@ def triage_papers(
 
     prompts = [_build_triage_prompt(paper, profile_text) for paper in papers]
 
-    triage_concurrency = full_config.get("concurrency", {}).get("triage", TRIAGE_CONCURRENCY)
+    triage_concurrency = full_config.get("concurrency", {}).get(
+        "triage", TRIAGE_CONCURRENCY
+    )
 
     try:
         decisions = asyncio.run(
-            _run_triage_async(prompts, pollux_config, min_score=min_score, concurrency=triage_concurrency)
+            _run_triage_async(
+                prompts,
+                pollux_config,
+                min_score=min_score,
+                concurrency=triage_concurrency,
+            )
         )
     except Exception as exc:
         logger.warning(
@@ -357,9 +366,13 @@ async def _summarize_one_paper_async(
     return str(response)
 
 
-def _resolve_summary_model_config(config: Dict[str, Any]) -> tuple[ProviderName, str, str]:
+def _resolve_summary_model_config(
+    config: Dict[str, Any],
+) -> tuple[ProviderName, str, str]:
     llm_provider = (config.get("llm_provider") or "openai").lower().strip()
-    api_key = config.get("api_key") or os.getenv(f"{llm_provider.upper()}_API_KEY") or ""
+    api_key = (
+        config.get("api_key") or os.getenv(f"{llm_provider.upper()}_API_KEY") or ""
+    )
     if llm_provider not in ("openai", "gemini") or not api_key:
         raise ValueError(
             "Summary analyzer requires a valid llm_provider (openai|gemini) and api_key."
@@ -385,7 +398,9 @@ def summarize_papers(  # noqa: C901
     provider, model_name, api_key = _resolve_summary_model_config(config)
     max_input_tokens = _int_setting(config.get("max_input_tokens"), 7000, minimum=500)
     max_input_chars = _int_setting(config.get("max_input_chars"), 20_000, minimum=1000)
-    effective_concurrency = summary_concurrency if summary_concurrency is not None else SUMMARY_CONCURRENCY
+    effective_concurrency = (
+        summary_concurrency if summary_concurrency is not None else SUMMARY_CONCURRENCY
+    )
 
     pollux_config = Config(
         provider=provider,
@@ -399,7 +414,9 @@ def summarize_papers(  # noqa: C901
         ),
     )
 
-    async def _run_summary_batch() -> tuple[List[str | None], List[tuple[int, BaseException]]]:
+    async def _run_summary_batch() -> (
+        tuple[List[str | None], List[tuple[int, BaseException]]]
+    ):
         semaphore = asyncio.Semaphore(effective_concurrency)
         results: List[str | None] = [None] * len(papers)
         failures: List[tuple[int, BaseException]] = []

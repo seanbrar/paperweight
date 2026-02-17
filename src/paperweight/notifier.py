@@ -124,7 +124,9 @@ def render_atom_feed(
             ET.SubElement(entry, f"{{{ns}}}category", {"term": cat})
 
         ET.SubElement(entry, f"{{{ns}}}summary").text = summary
-        ET.SubElement(entry, f"{{{ns}}}content", {"type": "text"}).text = (
+        ET.SubElement(
+            entry, f"{{{ns}}}content", {"type": "text"}
+        ).text = (
             f"Score: {score:.2f}\nWhy: {rationale}\nLink: {link}\nSummary: {summary}"
         )
 
@@ -206,7 +208,9 @@ def send_email_notification(subject, body, config):
         if use_auth and from_password:
             server.login(from_email, from_password)
         elif use_auth and not from_password:
-            logger.warning("SMTP auth enabled but no password provided; skipping login.")
+            logger.warning(
+                "SMTP auth enabled but no password provided; skipping login."
+            )
         text = msg.as_string()
         server.sendmail(from_email, to_email, text)
         server.quit()
@@ -234,6 +238,8 @@ def compile_and_send_notifications(papers, config):
     sort_order = config.get("email", {}).get("sort_order", "relevance")
     papers = _sort_papers(papers, sort_order)
     subject = "New Papers from ArXiv"
-    body = render_text_digest(papers, sort_order=sort_order, heading="New Papers from ArXiv")
+    body = render_text_digest(
+        papers, sort_order=sort_order, heading="New Papers from ArXiv"
+    )
     success = send_email_notification(subject, body, config)
     return success
